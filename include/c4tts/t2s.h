@@ -37,5 +37,41 @@ class GPT2 {
 // GPT-2's gelu_new (tanh approximation).
 Tensor gelu_new(const Tensor& x);
 
+// ECAPA-TDNN speaker encoder (llm/speaker_encoder.py:Qwen3TTSSpeakerEncoder).
+// Produces the T2S condition embedding from prompt semantic features.
+//   input: (B, T, mel_dim) -> (B, enc_dim)   (forward, no L2 normalize)
+class SpeakerEncoder {
+ public:
+  SpeakerEncoder(const WeightStore& w, const std::string& prefix);
+  Tensor forward(const Tensor& x) const;
+
+ private:
+  // "same"-padding reflect TDNN conv (+ optional ReLU).
+  Tensor tdnn(const Tensor& x, const std::string& p, int kernel, int dilation,
+              bool relu) const;
+  Tensor se_res2net_block(const Tensor& x, const std::string& p, int kernel,
+                          int dilation) const;
+  Tensor attentive_stats_pooling(const Tensor& x, const std::string& p) const;
+
+  const WeightStore& w_;
+  std::string p_;
+};
+
+// llm/text_encoder.py:TextEmbeddingProjector — Embedding -> fc1 -> SiLU -> fc2.
+//   text_ids: (B, T) int -> (B, T, output_size)
+class TextEmbeddingProjector {
+ public:
+  TextEmbeddingProjector(const WeightStore& w, const std::string& prefix);
+  Tensor forward(const Tensor& text_ids) const;
+
+ private:
+  const WeightStore& w_;
+  std::string p_;
+};
+
+// llm/position_embeddings.py:LearnedPositionalEmbedding — add learned pos emb.
+//   x: (B, T, D); adds embedding rows [0, T).
+Tensor add_learned_positions(const Tensor& x, const Tensor& pos_table);
+
 }  // namespace t2s
 }  // namespace c4

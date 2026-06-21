@@ -543,6 +543,54 @@ def dump_gpt2(out_base):
     print(f"[gpt2] inputs_embeds{tuple(emb.shape)} -> {tuple(out.shape)} ; {out_dir}")
 
 
+def dump_t2s_mods(out_base):
+    """T2S D-2: SpeakerEncoder (ECAPA), TextEmbeddingProjector, position emb."""
+    from confuciustts.llm.speaker_encoder import (
+        Qwen3TTSSpeakerEncoder, Qwen3TTSSpeakerEncoderConfig)
+    from confuciustts.llm.text_encoder import TextEmbeddingProjector
+    from confuciustts.llm.position_embeddings import LearnedPositionalEmbedding
+
+    out_dir = os.path.join(out_base, "t2s_mods")
+
+    # --- SpeakerEncoder (small config, same architecture as the real one) ---
+    torch.manual_seed(41)
+    cfg = Qwen3TTSSpeakerEncoderConfig(
+        mel_dim=64, enc_dim=80, enc_channels=[64, 64, 64, 64, 128],
+        enc_kernel_sizes=[5, 3, 3, 3, 1], enc_dilations=[1, 2, 3, 4, 1],
+        enc_attention_channels=16, enc_res2net_scale=8, enc_se_channels=16)
+    spk = Qwen3TTSSpeakerEncoder(cfg).eval()
+    sx = torch.randn(1, 15, 64)
+    with torch.no_grad():
+        sy = spk(sx)  # (1, 80)
+    for k, v in spk.state_dict().items():
+        _save(out_dir, "spk." + k, v.detach().cpu().numpy())
+    _save(out_dir, "spk_x", sx.numpy())
+    _save(out_dir, "spk_out", sy.numpy())
+
+    # --- TextEmbeddingProjector ---
+    torch.manual_seed(42)
+    tp = TextEmbeddingProjector(vocab_size=50, embed_dim=32, output_size=16).eval()
+    tids = torch.randint(0, 50, (1, 7))
+    with torch.no_grad():
+        ty = tp(tids)
+    for k, v in tp.state_dict().items():
+        _save(out_dir, "tp." + k, v.detach().cpu().numpy())
+    _save(out_dir, "tp_ids", tids.numpy().astype("int64"))
+    _save(out_dir, "tp_out", ty.numpy())
+
+    # --- LearnedPositionalEmbedding ---
+    torch.manual_seed(43)
+    pe = LearnedPositionalEmbedding(20, 16).eval()
+    px = torch.randn(1, 9, 16)
+    with torch.no_grad():
+        py = pe(px)
+    _save(out_dir, "pe_table", pe.embedding.weight.detach().numpy())
+    _save(out_dir, "pe_x", px.numpy())
+    _save(out_dir, "pe_out", py.numpy())
+
+    print(f"[t2s_mods] SpeakerEncoder/TextProjector/PosEmb -> {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -556,6 +604,7 @@ DUMPERS = {
     "vocoder_act": dump_vocoder_act,
     "bigvgan": dump_bigvgan,
     "gpt2": dump_gpt2,
+    "t2s_mods": dump_t2s_mods,
 }
 
 
