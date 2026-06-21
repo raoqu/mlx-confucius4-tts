@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "c4tts/pipeline.h"
+#include "c4tts/tokenizer.h"
 #include "c4tts/wav_io.h"
 #include "mlx/mlx.h"
 
@@ -46,19 +47,26 @@ int synth(int argc, char** argv) {
   const std::string weights = arg(argc, argv, "--weights", "weights");
   const std::string prompt = arg(argc, argv, "--prompt");
   const std::string tokens = arg(argc, argv, "--tokens");
+  const std::string text = arg(argc, argv, "--text");
   const std::string out = arg(argc, argv, "--out", "output.wav");
-  if (prompt.empty() || tokens.empty()) {
+  if (prompt.empty() || (tokens.empty() && text.empty())) {
     std::cerr << "usage: c4tts_cli synth --weights DIR --prompt ref.wav "
-                 "--tokens ids.txt --out out.wav\n";
+                 "(--text \"...\" | --tokens ids.txt) --out out.wav\n";
     return 2;
   }
 
   std::vector<int> ids;
-  std::ifstream tf(tokens);
-  int id;
-  while (tf >> id) ids.push_back(id);
+  if (!text.empty()) {
+    // Tokenize in C++ (SentencePiece BPE), BOS+EOS per the LlamaTokenizer config.
+    c4::Tokenizer tok(weights + "/tokenizer/vocab.tsv");
+    ids = tok.encode(text, /*add_bos=*/true, /*add_eos=*/true);
+  } else {
+    std::ifstream tf(tokens);
+    int id;
+    while (tf >> id) ids.push_back(id);
+  }
   if (ids.empty()) {
-    std::cerr << "c4tts: no token ids read from " << tokens << "\n";
+    std::cerr << "c4tts: no token ids\n";
     return 2;
   }
 
