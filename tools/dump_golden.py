@@ -708,6 +708,20 @@ def dump_w2vbert(out_base):
     print(f"[w2vbert] feats{tuple(feats.shape)} -> last {tuple(out.last_hidden_state.shape)} ; {out_dir}")
 
 
+def dump_fbank(out_base):
+    """Kaldi fbank (B3): torchaudio.compliance.kaldi.fbank parity."""
+    import torchaudio
+
+    out_dir = os.path.join(out_base, "fbank")
+    torch.manual_seed(47)
+    wav = torch.randn(1, 6000) * 0.1  # ~0.375 s at 16 kHz
+    fb = torchaudio.compliance.kaldi.fbank(
+        wav, num_mel_bins=80, sample_frequency=16000, dither=0.0)
+    _save(out_dir, "wav", wav.squeeze(0).numpy())
+    _save(out_dir, "fbank", fb.numpy())
+    print(f"[fbank] wav{tuple(wav.shape)} -> {tuple(fb.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -725,6 +739,7 @@ DUMPERS = {
     "t2s_full": dump_t2s_full,
     "campplus": dump_campplus,
     "w2vbert": dump_w2vbert,
+    "fbank": dump_fbank,
 }
 
 

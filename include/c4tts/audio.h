@@ -23,6 +23,14 @@ struct MelConfig {
 // Reflects without repeating the edge sample (requires pad < len(x)).
 Tensor reflect_pad1d(const Tensor& x, int pad);
 
+// Kaldi-compatible log-mel filterbank, matching
+// torchaudio.compliance.kaldi.fbank(num_mel_bins=80, sample_frequency=16000,
+// dither=0.0) with default povey window / preemphasis 0.97 / snip_edges.
+//   wav: (T,) float waveform at sample_rate -> (num_frames, num_mel_bins).
+// Mean subtraction is NOT applied (subtract_mean=False), matching the default.
+Tensor kaldi_fbank(const Tensor& wav, int num_mel_bins = 80,
+                   float sample_rate = 16000.0f);
+
 // Log-mel spectrogram matching mel_spectrogram() in audio_features.py.
 //   audio:     (T,) float32 waveform
 //   mel_basis: (n_mels, n_fft/2 + 1) librosa slaney filterbank
