@@ -51,6 +51,37 @@ parity (max abs error / cosine):
 NN primitives (linear, conv1d/2d/transpose, norms, attention, embeddings,
 activations) are individually parity-tested.
 
+## Quick start
+
+Convenience scripts at the repository root wrap the whole flow:
+
+```bash
+./build.sh      # compile (Release) -> c4tts/build/c4tts_cli
+./prepare.sh    # export ALL runtime model files into c4tts/weights/
+./start.sh      # text -> speech end to end (auto-builds + prepares on first run)
+./clean.sh      # remove build/  (./clean.sh --all also drops weights/ + golden/)
+```
+
+`prepare.sh` downloads the checkpoints to the HuggingFace cache and exports them
+to `c4tts/weights/` (w2vbert, campplus, s2a, bigvgan, t2s, audio, tokenizer).
+The 2.6 GB T2S checkpoint may instead be placed at
+`./downloads/t2s_model.safetensors` or `~/Downloads/t2s_model.safetensors`.
+
+Command-line example:
+
+```bash
+# ./start.sh [PROMPT_WAV] [TEXT] [OUT_WAV] [-- extra c4tts_cli flags]
+./start.sh output.wav "你好，欢迎使用 c4tts 语音合成引擎。" demo_out.wav -- --steps 25
+
+# or the binary directly:
+./c4tts/build/c4tts_cli synth --weights c4tts/weights \
+    --prompt output.wav --text "Hello, world. 你好世界" --out demo_out.wav
+```
+
+`--prompt` is a reference voice clip (any sample rate) whose timbre is cloned;
+`--text` is the text to speak. Flags: `--steps N`, `--max-tokens N`, `--greedy`,
+`--bench`.
+
 ## Build
 
 Requirements: macOS / Apple Silicon, CMake ≥ 3.24, recent Apple Clang, and the
