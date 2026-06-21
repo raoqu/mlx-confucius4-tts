@@ -62,10 +62,20 @@ int synth(int argc, char** argv) {
     return 2;
   }
 
+  c4::SynthOptions opt;
+  const std::string mt = arg(argc, argv, "--max-tokens");
+  if (!mt.empty()) opt.max_new_tokens = std::stoi(mt);
+  const std::string st = arg(argc, argv, "--steps");
+  if (!st.empty()) opt.n_timesteps = std::stoi(st);
+  for (int i = 1; i < argc; ++i)
+    if (std::strcmp(argv[i], "--greedy") == 0) opt.sample = false;
+
   std::cout << "c4tts: loading weights from " << weights << " ...\n";
   c4::Pipeline pipe(weights);
-  std::cout << "c4tts: synthesizing (" << ids.size() << " text tokens) ...\n";
-  c4::Tensor wav = pipe.synth(prompt, ids);
+  std::cout << "c4tts: synthesizing (" << ids.size() << " text tokens, "
+            << "max_new=" << opt.max_new_tokens << ", steps=" << opt.n_timesteps
+            << ", " << (opt.sample ? "sampling" : "greedy") << ") ...\n";
+  c4::Tensor wav = pipe.synth(prompt, ids, opt);
   c4::write_wav(out, wav, pipe.sample_rate());
   std::cout << "c4tts: wrote " << out << "\n";
   return 0;
