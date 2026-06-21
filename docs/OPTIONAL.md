@@ -46,12 +46,20 @@
 实测要点：单纯把 Euler 砍到 16 步以下波形就发散（见下"度量注意"），所以要的是
 "换求解器"而非"减步数"。无重训，中等工作量；质量需用感知 / mel 距离评估。
 
-### A2. BigVGAN int8/fp16（~1.5–1.8×）
-单次前向、卷积 / GEMM 受限，量化收益确定。
-**前提**：先修 `nn.cpp` 的标量 dtype 串扰——`mx::array(eps)` 等常量是 fp32，会把
-fp16 激活强制上转回 fp32，导致量化收益消失（之前 S2A/BigVGAN 的 fp16 没收益正是栽在这）。
-修法：让 `layer_norm` / `group_norm` / `silu` / snakebeta 里的标量常量取激活的 dtype
-（`mx::array(eps, x.dtype())`），对 fp32 路径是 no-op、无回归。
+### A2. ~~BigVGAN int8/fp16~~ —— ❌ 实测 fp16 无效，改走 int8（仅 S2A）
+**实测结论（2026-06）：fp16 在本机 MLX/Metal 上不能加速 conv/这些阶段。**
+做法：先修了 `nn.cpp` 的标量 dtype 串扰（`mx::array(eps, x.dtype())` + норм 在 fp32 统计、
+返回输入 dtype），消除 churn 后再给 BigVGAN 开 fp16——结果 **BigVGAN fp16 反而更慢**
+（890ms vs fp32 664ms），且波形 max_abs 0.108。原因：MLX 的 Metal **卷积**没有
+fp16 加速路径（甚至内部上转），cast 开销反而拖累。这与早先 T2S fp16 仅 ~1.1×、S2A fp16
+无收益一致。**该路已放弃并回退**（含 nn dtype 改动，因无 fp16 消费者）。
+
+**真正有效的量化原语是 int8 `quantized_matmul`**（T2S 实测 2×），只适用于 **matmul 重**
+的阶段：
+- **S2A DiT**：其 "conv1/conv2/proj" 其实是 Linear，且按 T 帧是 M>1 的 GEMM —— 用
+  int8 `quantized_matmul`（同 T2S proj 方案）有望 ~1.5–2×/前向，且与 A1 求解器（减前向数）
+  正交叠加。**这是 S2A 计算侧的推荐路线。**
+- **BigVGAN**：纯卷积，MLX 无 int8 conv —— 短期维持 fp32，要提速得上自定义 Metal kernel（D1）。
 
 ### A3. T2S `mx::compile`（定长 KV cache）+ GPU 端采样 + semantic_head int8
 - **compile**：需要预分配定长 KV cache（之前用 shapeless 被 MLX 形状推断挡住：
@@ -119,6 +127,9 @@ CoreML 转换、与 MLX 混跑的协调，落地风险高、不确定性大。
   时长 ±20%（不推荐）。
 - **warmup 混淆**：服务端首个请求慢主要是 MLX kernel 首次编译（warmup），不要把它误算成
   某项优化的收益；用第 2、3 个（已 warm）请求做对比。
+- **fp16 在本机不是加速手段**：实测 T2S fp16 仅 ~1.1×、S2A/BigVGAN fp16 无收益甚至更慢
+  （BigVGAN conv fp16 890ms vs fp32 664ms）。MLX/Metal 对这些 op 的 fp16 路径不加速。
+  **加速靠 int8 `quantized_matmul`（matmul 重的阶段），不是 fp16。**
 
 ---
 
@@ -129,15 +140,18 @@ CoreML 转换、与 MLX 混跑的协调，落地风险高、不确定性大。
 
 ROI 从高到低（均可独立验证）：
 
-| 选项 | 收益 | 工作量 | 重训? |
-|---|---|---|---|
-| ① S2A 换 DPM-Solver++ 求解器 | S2A ~2× | 中 | 否 |
-| ② `nn.cpp` 标量 dtype 修复 → BigVGAN int8 | BigVGAN ~1.7× | 中 | 否 |
-| ③ T2S `mx::compile` + 定长 KV cache | T2S ~1.3× | 中大 | 否 |
-| ④ **T2S Medusa / 投机解码** | T2S ~2× | 大 | 轻量 |
-| ⑤ 自定义融合 Metal kernel（解码步 / 声码器） | ~1.5–2× | 很大 | 否 |
+| 选项 | 收益 | 工作量 | 重训? | 状态 |
+|---|---|---|---|---|
+| ① S2A 换 DPM-Solver++ 求解器 | S2A ~2× | 中 | 否 | **下一步** |
+| ⑥ 长文本多段批处理（batched decode） | 长文本 T2S ~2.5× | 中大 | 否 | 计划中 |
+| ②' S2A DiT int8 `quantized_matmul` | S2A/前向 ~1.5–2× | 中大 | 否 | 计划中（替代原 fp16 方案）|
+| ③ T2S `mx::compile` + 定长 KV cache | T2S ~1.3× | 中大 | 否 | — |
+| ④ **T2S Medusa / 投机解码** | T2S ~2× | 大 | 轻量 | 冲 2–3× 必经 |
+| ⑤ 自定义融合 Metal kernel（解码步 / 声码器） | ~1.5–2× | 很大 | 否 | BigVGAN 提速唯一路 |
+| ~~② BigVGAN/S2A fp16~~ | — | — | — | ❌ 实测无效，已放弃 |
 
-- ①②③ 一轮做完约 **1.5×**（RTF 0.57 → ~0.38，全部无重训、忠实原模型）。
-- 要冲 **2–3×**，④（投机解码）是必经之路，或上 ⑤（Metal kernel）。
+- ① + ⑥ + ②' 一轮做完，长文本可达 ~1.8–2.2×（求解器 + 批处理 + S2A int8），全部无重训。
+- 要让**短句**也到 2–3×，④（投机解码）是必经之路，或上 ⑤（Metal kernel）。
 
 **推荐首步：① S2A 高阶求解器** —— 单点最干净、无重训、可立刻 A/B 验证质量的 ~2× 收益。
+**关键教训：本机加速靠 int8 `quantized_matmul`，不靠 fp16。**
