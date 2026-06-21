@@ -1,0 +1,11 @@
+# Build output
+build/
+*.o
+*.a
+*.dylib
+
+# Generated weight packs and golden vectors (large; produced by tools/)
+*.c4w
+*.npz
+weights/
+golden/
