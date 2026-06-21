@@ -7,6 +7,9 @@
 // Text tokenization (SentencePiece) and normalization run upstream; `synth`
 // consumes integer token ids (one per line) so the C++ engine is Python-free.
 
+#include <mach-o/dyld.h>
+
+#include <climits>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -44,8 +47,23 @@ std::string arg(int argc, char** argv, const std::string& key,
   return dflt;
 }
 
+// Default model directory: <repo>/bin, resolved relative to the executable
+// (<repo>/c4tts/build/c4tts_cli) so it works regardless of the current dir.
+std::string default_weights_dir() {
+  char buf[PATH_MAX];
+  uint32_t sz = sizeof(buf);
+  if (_NSGetExecutablePath(buf, &sz) == 0) {
+    std::string p(buf);
+    auto slash = p.find_last_of('/');
+    if (slash != std::string::npos) return p.substr(0, slash) + "/../../bin";
+  }
+  return "bin";
+}
+
 int synth(int argc, char** argv) {
-  const std::string weights = arg(argc, argv, "--weights", "weights");
+  std::string weights = arg(argc, argv, "--weights");
+  if (weights.empty()) weights = arg(argc, argv, "--weight");  // tolerate singular
+  if (weights.empty()) weights = default_weights_dir();
   const std::string prompt = arg(argc, argv, "--prompt");
   const std::string tokens = arg(argc, argv, "--tokens");
   const std::string text = arg(argc, argv, "--text");
@@ -65,8 +83,16 @@ int synth(int argc, char** argv) {
   if (!text.empty()) {
     // Wrap with the model's trained prompt format unless --raw-text is given,
     // then tokenize in C++ (SentencePiece BPE) with BOS+EOS (LlamaTokenizer cfg).
+    const std::string vocab_path = weights + "/tokenizer/vocab.tsv";
+    std::ifstream vf(vocab_path);
+    if (!vf.good()) {
+      std::cerr << "c4tts: cannot find " << vocab_path
+                << "\n       check --weights points at the export dir (e.g. "
+                   "c4tts/weights) and run ./prepare.sh\n";
+      return 2;
+    }
     const std::string formatted = raw ? text : c4::format_tts_text(text, lang);
-    c4::Tokenizer tok(weights + "/tokenizer/vocab.tsv");
+    c4::Tokenizer tok(vocab_path);
     ids = tok.encode(formatted, /*add_bos=*/true, /*add_eos=*/true);
   } else {
     std::ifstream tf(tokens);

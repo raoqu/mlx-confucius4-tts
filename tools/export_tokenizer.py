@@ -16,7 +16,7 @@ def main():
     import sentencepiece as spm
     from sentencepiece import sentencepiece_model_pb2 as pb
 
-    out_dir = os.path.join(REPO_ROOT, "c4tts", "weights", "tokenizer")
+    out_dir = os.path.join(REPO_ROOT, "bin", "tokenizer")
     os.makedirs(out_dir, exist_ok=True)
     model = glob.glob(os.path.expanduser(
         "~/.cache/huggingface/hub/models--netease-youdao--Confucius4-TTS/"

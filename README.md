@@ -29,8 +29,7 @@ checkpoints. **No Python runs at inference** (Python is used only for one-time
 weight/vocab export). Every stage is parity-verified against PyTorch.
 
 ```bash
-./build/c4tts_cli synth --weights weights --prompt ref.wav \
-    --text "You are a helpful assistant. 请用中文朗读接下来的文字:你好世界" --out out.wav
+./build/c4tts_cli synth --prompt ref.wav --lang zh --text "你好世界" --out out.wav
 ```
 
 ## Parity-verified modules
@@ -57,13 +56,13 @@ Convenience scripts at the repository root wrap the whole flow:
 
 ```bash
 ./build.sh      # compile (Release) -> c4tts/build/c4tts_cli
-./prepare.sh    # export ALL runtime model files into c4tts/weights/
+./prepare.sh    # export ALL runtime model files into bin/
 ./start.sh      # text -> speech end to end (auto-builds + prepares on first run)
-./clean.sh      # remove build/  (./clean.sh --all also drops weights/ + golden/)
+./clean.sh      # remove build/  (./clean.sh --all also drops bin/ + golden/)
 ```
 
 `prepare.sh` downloads the checkpoints to the HuggingFace cache and exports them
-to `c4tts/weights/` (w2vbert, campplus, s2a, bigvgan, t2s, audio, tokenizer).
+to `bin/` (w2vbert, campplus, s2a, bigvgan, t2s, audio, tokenizer).
 The 2.6 GB T2S checkpoint may instead be placed at
 `./downloads/t2s_model.safetensors` or `~/Downloads/t2s_model.safetensors`.
 
@@ -74,7 +73,7 @@ Command-line example:
 ./start.sh output.wav "你好，欢迎使用 c4tts 语音合成引擎。" demo_out.wav -- --steps 25
 
 # or the binary directly (English -> --lang en):
-./c4tts/build/c4tts_cli synth --weights c4tts/weights --prompt output.wav \
+./c4tts/build/c4tts_cli synth --prompt output.wav \
     --lang en --text "Hello, this is a voice cloning demo." --out demo_out.wav
 ```
 
@@ -99,16 +98,18 @@ ctest --test-dir build --output-on-failure      # run the parity suite
 
 ## Run
 
-1. Export model weights to a `WeightStore` (one-time; reads the HF cache):
+1. Export all runtime model files to `bin/` (one-time; reads the HF cache):
    ```bash
-   python3 tools/export_weights.py all     # w2vbert, campplus, s2a, bigvgan, t2s, audio
+   ./prepare.sh                              # or: python3 tools/export_weights.py all
+                                             #     python3 tools/export_tokenizer.py
    ```
-2. Tokenize text upstream (SentencePiece `tokenizer.model`) to integer ids, one
-   per line in `ids.txt`. Then:
+2. Synthesize. `--weights` defaults to `bin/` (resolved relative to the binary),
+   and `--text` is tokenized in C++:
    ```bash
-   ./build/c4tts_cli synth --weights weights \
-       --prompt ref.wav --tokens ids.txt --out out.wav
+   ./build/c4tts_cli synth --prompt ref.wav --lang zh --text "你好世界" --out out.wav
    ```
+   `--tokens ids.txt` (one id per line) is still accepted as an alternative to
+   `--text` for externally tokenized input.
 
 ## Layout
 

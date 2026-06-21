@@ -23,7 +23,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-DEFAULT_OUT = os.path.join(REPO_ROOT, "c4tts", "weights")
+DEFAULT_OUT = os.path.join(REPO_ROOT, "bin")
 # Recomputable buffers we never need to ship: DiT RoPE table, and the fixed
 # Kaiser-sinc anti-aliasing filters (baked separately for the vocoder).
 SKIP_SUFFIXES = ("freqs_cis", ".filter")
