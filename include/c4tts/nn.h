@@ -29,6 +29,21 @@ Tensor conv_transpose1d(const Tensor& x, const Tensor& weight,
                         const Tensor* bias = nullptr, int stride = 1,
                         int padding = 0, int groups = 1);
 
+// 2-D convolution in PyTorch conventions:
+//   input:  (N, C_in, H, W)
+//   weight: (C_out, C_in/groups, kH, kW)
+//   output: (N, C_out, H_out, W_out)
+Tensor conv2d(const Tensor& x, const Tensor& weight, const Tensor* bias = nullptr,
+              int stride_h = 1, int stride_w = 1, int pad_h = 0, int pad_w = 0,
+              int groups = 1);
+
+// BatchNorm (eval mode) over the channel axis using running statistics:
+//   y = (x - mean) / sqrt(var + eps) * gamma + beta
+// channel_axis selects the channel dim (1 for (N,C,...) tensors).
+Tensor batch_norm(const Tensor& x, const Tensor& mean, const Tensor& var,
+                  const Tensor* gamma = nullptr, const Tensor* beta = nullptr,
+                  float eps = 1e-5f, int channel_axis = 1);
+
 // LayerNorm over the last dimension (PyTorch nn.LayerNorm with normalized_shape
 // = last dim). weight/bias optional (elementwise_affine).
 Tensor layer_norm(const Tensor& x, const Tensor* weight = nullptr,

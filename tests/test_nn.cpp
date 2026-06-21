@@ -47,6 +47,14 @@ int main() {
     check("rms_norm", c4::nn::rms_norm(L("rms_x"), w), L("rms_y"));
   }
   {
+    c4::Tensor w = L("conv2d_w"), b = L("conv2d_b");
+    check("conv2d", c4::nn::conv2d(L("conv2d_x"), w, &b, 2, 1, 1, 1), L("conv2d_y"));
+  }
+  {
+    c4::Tensor mean = L("bn_mean"), var = L("bn_var"), g = L("bn_w"), bt = L("bn_b");
+    check("batch_norm", c4::nn::batch_norm(L("bn_x"), mean, var, &g, &bt), L("bn_y"));
+  }
+  {
     c4::Tensor x = L("act_x");
     check("silu", c4::nn::silu(x), L("act_silu"));
     check("gelu", c4::nn::gelu(x), L("act_gelu"));

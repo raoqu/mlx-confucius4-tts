@@ -117,6 +117,33 @@ def dump_nn(out_base):
     _save(out_dir, "rms_w", rw.numpy())
     _save(out_dir, "rms_y", ry.numpy())
 
+    # conv2d (N,C,H,W), groups=1, stride (2,1), padding 1
+    c2x = torch.randn(1, 3, 8, 6)
+    c2w = torch.randn(5, 3, 3, 3)
+    c2b = torch.randn(5)
+    c2y = F.conv2d(c2x, c2w, c2b, stride=(2, 1), padding=1)
+    _save(out_dir, "conv2d_x", c2x.numpy())
+    _save(out_dir, "conv2d_w", c2w.numpy())
+    _save(out_dir, "conv2d_b", c2b.numpy())
+    _save(out_dir, "conv2d_y", c2y.numpy())
+
+    # batch_norm (eval) on (N,C,T) with running stats
+    bn = torch.nn.BatchNorm1d(8)
+    bn.running_mean.normal_()
+    bn.running_var.uniform_(0.5, 1.5)
+    bn.weight.data.normal_()
+    bn.bias.data.normal_()
+    bn.eval()
+    bnx = torch.randn(2, 8, 10)
+    with torch.no_grad():
+        bny = bn(bnx)
+    _save(out_dir, "bn_x", bnx.numpy())
+    _save(out_dir, "bn_mean", bn.running_mean.numpy())
+    _save(out_dir, "bn_var", bn.running_var.numpy())
+    _save(out_dir, "bn_w", bn.weight.detach().numpy())
+    _save(out_dir, "bn_b", bn.bias.detach().numpy())
+    _save(out_dir, "bn_y", bny.numpy())
+
     # activations
     ax = torch.randn(4, 32)
     _save(out_dir, "act_x", ax.numpy())

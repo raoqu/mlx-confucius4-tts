@@ -45,6 +45,31 @@ Tensor conv_transpose1d(const Tensor& x, const Tensor& weight,
   return mx::transpose(y, {0, 2, 1});  // (N, Cout, Lout)
 }
 
+Tensor conv2d(const Tensor& x, const Tensor& weight, const Tensor* bias,
+              int stride_h, int stride_w, int pad_h, int pad_w, int groups) {
+  // PyTorch (N,Cin,H,W)/(Cout,Cin/g,kH,kW) -> MLX (N,H,W,Cin)/(Cout,kH,kW,Cin/g).
+  Tensor x_nhwc = mx::transpose(x, {0, 2, 3, 1});
+  Tensor w_mlx = mx::transpose(weight, {0, 2, 3, 1});
+  Tensor y = mx::conv2d(x_nhwc, w_mlx, {stride_h, stride_w}, {pad_h, pad_w},
+                        {1, 1}, groups);
+  if (bias) y = mx::add(y, mx::reshape(*bias, {1, 1, 1, -1}));
+  return mx::transpose(y, {0, 3, 1, 2});  // back to (N, Cout, H, W)
+}
+
+Tensor batch_norm(const Tensor& x, const Tensor& mean, const Tensor& var,
+                  const Tensor* gamma, const Tensor* beta, float eps,
+                  int channel_axis) {
+  // Reshape per-channel stats to broadcast over all but the channel axis.
+  std::vector<int> bshape(x.ndim(), 1);
+  bshape[channel_axis] = mean.shape(0);
+  auto rs = [&](const Tensor& t) { return mx::reshape(t, mx::Shape(bshape.begin(), bshape.end())); };
+  Tensor y = mx::divide(mx::subtract(x, rs(mean)),
+                        mx::sqrt(mx::add(rs(var), mx::array(eps))));
+  if (gamma) y = mx::multiply(y, rs(*gamma));
+  if (beta) y = mx::add(y, rs(*beta));
+  return y;
+}
+
 Tensor layer_norm(const Tensor& x, const Tensor* weight, const Tensor* bias,
                   float eps) {
   const int axis = x.ndim() - 1;
