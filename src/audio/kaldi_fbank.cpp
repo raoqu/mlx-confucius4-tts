@@ -95,4 +95,21 @@ Tensor kaldi_fbank(const Tensor& wav_in, int num_mel_bins, float sample_rate) {
   return mx::log(mx::maximum(mel, mx::array(eps)));
 }
 
+Tensor seamless_features(const Tensor& wav) {
+  Tensor fb = kaldi_fbank(wav, 80, 16000.0f);  // (m, 80) log-mel
+  const int m = fb.shape(0);
+
+  // Per-mel-bin zero-mean unit-var (ddof=1) normalization over time.
+  Tensor mean = mx::mean(fb, 0, /*keepdims=*/true);  // (1, 80)
+  Tensor diff = mx::subtract(fb, mean);
+  Tensor var = mx::divide(mx::sum(mx::square(diff), 0, true),
+                          mx::array(static_cast<float>(m - 1)));  // ddof=1
+  Tensor norm = mx::divide(diff, mx::sqrt(mx::add(var, mx::array(1e-7f))));
+
+  // Stride-2 frame stacking: (m, 80) -> (m//2, 160).
+  const int m2 = m - (m % 2);
+  norm = mx::slice(norm, mx::Shape{0, 0}, mx::Shape{m2, 80});
+  return mx::reshape(norm, {m2 / 2, 160});
+}
+
 }  // namespace c4

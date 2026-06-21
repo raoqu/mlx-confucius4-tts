@@ -722,6 +722,20 @@ def dump_fbank(out_base):
     print(f"[fbank] wav{tuple(wav.shape)} -> {tuple(fb.shape)} ; {out_dir}")
 
 
+def dump_seamless(out_base):
+    """SeamlessM4T feature extractor (B4): W2V-BERT 160-dim input features."""
+    from transformers import SeamlessM4TFeatureExtractor
+
+    out_dir = os.path.join(out_base, "seamless")
+    fe = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+    torch.manual_seed(48)
+    wav = (torch.randn(8000) * 0.1).numpy()  # 0.5 s at 16 kHz
+    feats = fe(wav, sampling_rate=16000, return_tensors="np")["input_features"][0]
+    _save(out_dir, "wav", wav)
+    _save(out_dir, "feats", feats)
+    print(f"[seamless] wav{wav.shape} -> {feats.shape} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -740,6 +754,7 @@ DUMPERS = {
     "campplus": dump_campplus,
     "w2vbert": dump_w2vbert,
     "fbank": dump_fbank,
+    "seamless": dump_seamless,
 }
 
 

@@ -31,6 +31,14 @@ Tensor reflect_pad1d(const Tensor& x, int pad);
 Tensor kaldi_fbank(const Tensor& wav, int num_mel_bins = 80,
                    float sample_rate = 16000.0f);
 
+// SeamlessM4T feature extractor for W2V-BERT (transformers
+// SeamlessM4TFeatureExtractor). Kaldi-style log-mel fbank, per-mel-bin
+// zero-mean/unit-var normalization (ddof=1), then stride-2 frame stacking.
+//   wav: (T,) 16 kHz -> (num_frames/2, 160).
+// (The 2^15 input scaling and energy offset are additive constants in the log
+// domain and cancel under the per-bin mean subtraction.)
+Tensor seamless_features(const Tensor& wav);
+
 // Log-mel spectrogram matching mel_spectrogram() in audio_features.py.
 //   audio:     (T,) float32 waveform
 //   mel_basis: (n_mels, n_fft/2 + 1) librosa slaney filterbank
