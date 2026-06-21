@@ -24,7 +24,9 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 DEFAULT_OUT = os.path.join(REPO_ROOT, "c4tts", "weights")
-SKIP_SUFFIXES = ("freqs_cis",)
+# Recomputable buffers we never need to ship: DiT RoPE table, and the fixed
+# Kaiser-sinc anti-aliasing filters (baked separately for the vocoder).
+SKIP_SUFFIXES = ("freqs_cis", ".filter")
 
 
 def _save(out_dir, name, arr):
@@ -50,8 +52,10 @@ def export_state_dict(sd, out_dir):
         if k.endswith(".weight_v"):
             g = sd[k[: -len("weight_v")] + "weight_g"]
             w = _fold_weight_norm(g, sd[k])
-            name = k[: -len(".conv.weight_v")] + ".weight"  # drop ".conv"
-            _save(out_dir, name, w.detach().cpu().numpy())
+            base = k[: -len(".weight_v")]
+            if base.endswith(".conv"):  # WeightNormConv1d wrapper (s2a wavenet)
+                base = base[: -len(".conv")]
+            _save(out_dir, base + ".weight", w.detach().cpu().numpy())
             n += 1
             continue
         # Plain tensor; collapse a ".conv." wrapper if present (WeightNormConv1d).
@@ -72,8 +76,28 @@ def export_s2a(out_base):
     print(f"[s2a] exported {n} tensors -> {out_dir}")
 
 
+def export_bigvgan(out_base):
+    from huggingface_hub import hf_hub_download
+    from external.bigvgan.alias_free_activation.torch.filter import (
+        kaiser_sinc_filter1d,
+    )
+    repo = "nvidia/bigvgan_v2_22khz_80band_256x"
+    f = hf_hub_download(repo, filename="bigvgan_generator.pt")
+    ckpt = torch.load(f, map_location="cpu", weights_only=False)
+    sd = ckpt["generator"] if "generator" in ckpt else ckpt
+    out_dir = os.path.join(out_base, "bigvgan")
+    n = export_state_dict(sd, out_dir)
+    # Bake the (ratio=2, kernel=12) Kaiser-sinc anti-aliasing filters once.
+    up = kaiser_sinc_filter1d(0.5 / 2, 0.6 / 2, 12).view(-1).numpy()
+    down = kaiser_sinc_filter1d(0.5 / 2, 0.6 / 2, 12).view(-1).numpy()
+    _save(out_dir, "up_filter", up)
+    _save(out_dir, "down_filter", down)
+    print(f"[bigvgan] exported {n} tensors (+filters) -> {out_dir}")
+
+
 EXPORTERS = {
     "s2a": export_s2a,
+    "bigvgan": export_bigvgan,
 }
 
 

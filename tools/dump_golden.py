@@ -500,6 +500,23 @@ def dump_vocoder_act(out_base):
           f"{tuple(y.shape)} ; {out_dir}")
 
 
+def dump_bigvgan(out_base):
+    """BigVGAN F-2: full generator (mel -> waveform) on the REAL checkpoint."""
+    from external.bigvgan.bigvgan import BigVGAN
+
+    out_dir = os.path.join(out_base, "bigvgan")
+    model = BigVGAN.from_pretrained("nvidia/bigvgan_v2_22khz_80band_256x",
+                                    use_cuda_kernel=False)
+    model.eval()
+    torch.manual_seed(30)
+    mel = torch.randn(1, 80, 10)
+    with torch.no_grad():
+        wav = model(mel)  # (1, 1, 2560)
+    _save(out_dir, "mel", mel.numpy())
+    _save(out_dir, "wav", wav.numpy())
+    print(f"[bigvgan] mel{tuple(mel.shape)} -> wav {tuple(wav.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -511,6 +528,7 @@ DUMPERS = {
     "cfm": dump_cfm,
     "s2a_infer": dump_s2a_inference,
     "vocoder_act": dump_vocoder_act,
+    "bigvgan": dump_bigvgan,
 }
 
 

@@ -28,9 +28,17 @@ Tensor conv1d(const Tensor& x, const Tensor& weight, const Tensor* bias,
 Tensor conv_transpose1d(const Tensor& x, const Tensor& weight,
                         const Tensor* bias, int stride, int padding,
                         int groups) {
-  // PyTorch (N,Cin,L)/(Cin,Cout/g,K) -> MLX (N,L,Cin)/(Cin,K,Cout/g).
-  Tensor x_nlc = mx::transpose(x, {0, 2, 1});
-  Tensor w_mlx = mx::transpose(weight, {0, 2, 1});
+  // PyTorch weight (Cin, Cout/g, K) -> MLX (Cout, K, Cin/g) via a group-aware
+  // reshape (a plain transpose only works for groups==1 or depthwise).
+  const int Cin = weight.shape(0);
+  const int coutg = weight.shape(1);
+  const int K = weight.shape(2);
+  const int cin_g = Cin / groups;
+  Tensor w_mlx = mx::reshape(weight, {groups, cin_g, coutg, K});
+  w_mlx = mx::transpose(w_mlx, {0, 2, 3, 1});         // (g, Cout/g, K, Cin/g)
+  w_mlx = mx::reshape(w_mlx, {groups * coutg, K, cin_g});
+
+  Tensor x_nlc = mx::transpose(x, {0, 2, 1});         // (N, L, Cin)
   Tensor y = mx::conv_transpose1d(x_nlc, w_mlx, stride, padding, /*dilation=*/1,
                                   /*output_padding=*/0, groups);
   if (bias) y = mx::add(y, mx::reshape(*bias, {1, 1, -1}));

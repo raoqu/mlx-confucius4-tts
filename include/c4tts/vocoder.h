@@ -6,7 +6,11 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "c4tts/tensor.h"
+#include "c4tts/weights.h"
 
 namespace c4 {
 namespace vocoder {
@@ -24,6 +28,26 @@ Tensor anti_aliased_snakebeta(const Tensor& x, const Tensor& alpha,
                               const Tensor& beta, const Tensor& up_filter,
                               const Tensor& down_filter, int ratio = 2,
                               int kernel_size = 12);
+
+// BigVGAN generator (bigvgan.py:BigVGAN), config nvidia/bigvgan_v2_22khz_80band_256x:
+// AMPBlock1 resblocks, snakebeta, 6 transposed-conv upsamples (256x total),
+// clamp final (use_tanh_at_final=False). mel (B, 80, T) -> waveform (B, 1, 256T).
+class BigVGAN {
+ public:
+  explicit BigVGAN(const WeightStore& w);
+  Tensor forward(const Tensor& mel) const;
+
+ private:
+  Tensor amp_block1(const Tensor& x, const std::string& prefix,
+                    int kernel_size) const;
+
+  const WeightStore& w_;
+  Tensor up_filter_, down_filter_;
+  std::vector<int> upsample_rates_;
+  std::vector<int> upsample_kernels_;
+  std::vector<int> resblock_kernels_;
+  std::vector<std::vector<int>> resblock_dilations_;
+};
 
 }  // namespace vocoder
 }  // namespace c4
