@@ -49,12 +49,12 @@ find_package(MLX CONFIG REQUIRED)
 message(STATUS "c4tts: MLX_INCLUDE_DIRS=${MLX_INCLUDE_DIRS}")
 
 # ---------------------------------------------------------------------------
-# Core library (grows over the phases in docs/PLAN.md). Empty for now; the
-# CLI links MLX directly so we can validate the toolchain end to end.
+# Core library (grows over the phases in docs/PLAN.md).
 # ---------------------------------------------------------------------------
-add_library(c4tts_core INTERFACE)
-target_include_directories(c4tts_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(c4tts_core INTERFACE mlx)
+file(GLOB_RECURSE C4TTS_CORE_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+add_library(c4tts_core STATIC ${C4TTS_CORE_SRC})
+target_include_directories(c4tts_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(c4tts_core PUBLIC mlx)
 
 # ---------------------------------------------------------------------------
 # CLI entry point.
