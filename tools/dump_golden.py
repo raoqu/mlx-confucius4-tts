@@ -517,6 +517,32 @@ def dump_bigvgan(out_base):
     print(f"[bigvgan] mel{tuple(mel.shape)} -> wav {tuple(wav.shape)} ; {out_dir}")
 
 
+def dump_gpt2(out_base):
+    """T2S D-1: GPT-2 transformer stack (with zeroed position embedding)."""
+    from transformers import GPT2Config, GPT2Model
+
+    out_dir = os.path.join(out_base, "gpt2")
+    torch.manual_seed(40)
+    cfg = GPT2Config(vocab_size=100, n_positions=64, n_embd=64, n_layer=3,
+                     n_head=4, resid_pdrop=0.0, embd_pdrop=0.0, attn_pdrop=0.0)
+    m = GPT2Model(cfg).eval()
+    m.wpe.weight.data.zero_()  # matches DummyPositionEmbedding (zeros)
+
+    emb = torch.randn(1, 9, 64)
+    with torch.no_grad():
+        out = m(inputs_embeds=emb).last_hidden_state
+
+    for k, v in m.state_dict().items():
+        if k.startswith("wpe") or k.startswith("wte"):
+            continue
+        if k.endswith(".attn.bias") or k.endswith(".attn.masked_bias"):
+            continue  # causal-mask buffers (not c_attn.bias); C++ builds its own
+        _save(out_dir, k, v.detach().cpu().numpy())
+    _save(out_dir, "emb", emb.numpy())
+    _save(out_dir, "out", out.numpy())
+    print(f"[gpt2] inputs_embeds{tuple(emb.shape)} -> {tuple(out.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -529,6 +555,7 @@ DUMPERS = {
     "s2a_infer": dump_s2a_inference,
     "vocoder_act": dump_vocoder_act,
     "bigvgan": dump_bigvgan,
+    "gpt2": dump_gpt2,
 }
 
 
