@@ -5,11 +5,11 @@ build/
 *.dylib
 
 # Runtime model files (exported by prepare.sh; multi-GB) and downloads
-bin/
+bin
 downloads/
 
 # Generated golden vectors / weight packs (produced by tools/)
-golden/
+golden
 *.c4w
 *.npz
 
