@@ -821,6 +821,38 @@ def dump_sampling(out_base):
     print(f"[sampling] vocab={vocab} -> {out_dir}")
 
 
+def dump_t2s_real(out_base):
+    """T2S D-3 on the REAL checkpoint: Text2Semantic.forward logits."""
+    import safetensors.torch
+    from confuciustts.llm.llm import Text2Semantic, Text2SemanticConfig
+
+    out_dir = os.path.join(out_base, "t2s_real")
+    cfg = Text2SemanticConfig(
+        num_layers=24, model_dim=1280, num_heads=20, vocab_size=32000,
+        semantic_vocab_size=8194, text_embedding_dim=4096,
+        speaker_embedding_dim=1024, start_semantic_token=8192,
+        stop_semantic_token=8193)
+    model = Text2Semantic(cfg).eval()
+    model.load_state_dict(safetensors.torch.load_file(
+        os.path.join(REPO_ROOT, "downloads", "t2s_model.safetensors"), device="cpu"))
+
+    torch.manual_seed(60)
+    T_text, T_sem, T_cond = 6, 8, 10
+    text_ids = torch.randint(0, 32000, (1, T_text))
+    semantic_codes = torch.randint(0, 8192, (1, T_sem))
+    condition_vector = torch.randn(1, T_cond, 1024)
+    attn = torch.ones(1, 1 + T_text + T_sem, dtype=torch.bool)
+    with torch.no_grad():
+        logits = model(text_inputs=text_ids, semantic_codes=semantic_codes,
+                       condition_vector=condition_vector, attention_mask=attn).logits
+
+    _save(out_dir, "text_ids", text_ids.numpy().astype("int64"))
+    _save(out_dir, "semantic_codes", semantic_codes.numpy().astype("int64"))
+    _save(out_dir, "condition_vector", condition_vector.numpy())
+    _save(out_dir, "logits", logits.numpy())
+    print(f"[t2s_real] logits {tuple(logits.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -843,6 +875,7 @@ DUMPERS = {
     "resample": dump_resample,
     "prompt": dump_prompt,
     "sampling": dump_sampling,
+    "t2s_real": dump_t2s_real,
 }
 
 

@@ -58,8 +58,10 @@ def export_state_dict(sd, out_dir):
             _save(out_dir, base + ".weight", w.detach().cpu().numpy())
             n += 1
             continue
-        # Plain tensor; collapse a ".conv." wrapper if present (WeightNormConv1d).
-        name = k.replace(".conv.", ".") if ".conv." in k else k
+        # Plain tensor; collapse the WeightNormConv1d ".conv." wrapper only for
+        # the s2a wavenet (its conv.bias). Other modules (e.g. the T2S speaker
+        # encoder TDNNs) use a real ".conv." sublayer that must be preserved.
+        name = k.replace(".conv.", ".") if (".conv." in k and "wavenet" in k) else k
         _save(out_dir, name, sd[k].detach().cpu().numpy())
         n += 1
     return n
