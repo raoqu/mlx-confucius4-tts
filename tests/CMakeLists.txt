@@ -38,3 +38,4 @@ c4tts_add_test(test_dit)
 
 c4tts_add_test(test_dit_block)
 c4tts_add_test(test_dit_wn)
+c4tts_add_test(test_dit_full)

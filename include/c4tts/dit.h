@@ -84,5 +84,30 @@ class WaveNet {
   int hidden_, n_layers_, kernel_, dil_rate_;
 };
 
+// Full DiT estimator (flow/DiT/dit.py:DiT) with WaveNet final layer.
+// Predicts the flow-matching velocity field.
+//   x:    (B, mel_dim, T)  noisy mel
+//   mask: (B, T) bool      padding mask (True = valid)
+//   mu:   (B, T, mu_dim)   conditioning
+//   t:    (B,)             timestep
+//   spks: (B, spk_dim)     speaker embedding
+//   cond: (B, mel_dim, T)  reference mel conditioning
+// returns (B, mel_dim, T).
+class DiT {
+ public:
+  DiT(const WeightStore& w, const std::string& prefix, int hidden,
+      int num_heads, int depth, int mel_dim, int wavenet_hidden,
+      int wavenet_layers, int wavenet_kernel, int wavenet_dilation_rate,
+      int spk_dim);
+  Tensor forward(const Tensor& x, const Tensor& mask, const Tensor& mu,
+                 const Tensor& t, const Tensor& spks, const Tensor& cond) const;
+
+ private:
+  const WeightStore& w_;
+  std::string p_;
+  int hidden_, num_heads_, depth_, mel_dim_, wn_hidden_, wn_layers_, wn_kernel_,
+      wn_dil_, spk_dim_;
+};
+
 }  // namespace dit
 }  // namespace c4

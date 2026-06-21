@@ -319,6 +319,58 @@ def dump_dit_wn(out_base):
     print(f"[dit_wn] WaveNet/FinalLayer -> {out_dir}")
 
 
+def dump_dit_full(out_base):
+    """DiT E3c-2: full DiT.forward (small config) with WaveNet final layer."""
+    from confuciustts.flow.DiT.dit import DiT
+
+    out_dir = os.path.join(out_base, "dit_full")
+    hidden, heads, depth, mel, mu_dim, spk = 32, 4, 5, 8, 16, 6
+    # The reference ties FinalLayer/wavenet width to hidden_dim (real config has
+    # estimator_hidden_dim == wavenet_hidden_dim == 512), so keep them equal.
+    wn_hidden, wn_kernel, wn_dil, wn_layers = 32, 5, 1, 3
+
+    torch.manual_seed(11)
+    dit = DiT(hidden_dim=hidden, num_heads=heads, depth=depth, mel_dim=mel,
+              mu_dim=mu_dim, spk_dim=spk, long_skip_connection=True,
+              ff_intermediate_size=hidden * 3, final_layer="wavenet",
+              wavenet_hidden_dim=wn_hidden, wavenet_kernel_size=wn_kernel,
+              wavenet_dilation_rate=wn_dil, wavenet_num_layers=wn_layers).eval()
+
+    B, T = 1, 10
+    x = torch.randn(B, mel, T)
+    mask = torch.ones(B, T, dtype=torch.bool)
+    mu = torch.randn(B, T, mu_dim)
+    t = torch.rand(B)
+    spks = torch.randn(B, spk)
+    cond = torch.randn(B, mel, T)
+    with torch.no_grad():
+        y = dit(x, mask, mu, t, spks, cond)
+
+    # All params except the buffer and wavenet (folded separately below).
+    for k, v in dit.state_dict().items():
+        if k == "freqs_cis" or k.startswith("wavenet."):
+            continue
+        _save(out_dir, k, v.detach().cpu().numpy())
+
+    def fold(mod, name):
+        _save(out_dir, name + ".weight", mod.conv.weight.detach().numpy())
+        _save(out_dir, name + ".bias", mod.conv.bias.detach().numpy())
+
+    fold(dit.wavenet.cond_layer, "wavenet.cond_layer")
+    for i in range(wn_layers):
+        fold(dit.wavenet.in_layers[i], f"wavenet.in_layers.{i}")
+        fold(dit.wavenet.res_skip_layers[i], f"wavenet.res_skip_layers.{i}")
+
+    _save(out_dir, "x", x.numpy())
+    _save(out_dir, "mask", mask.float().numpy())
+    _save(out_dir, "mu", mu.numpy())
+    _save(out_dir, "t", t.numpy())
+    _save(out_dir, "spks", spks.numpy())
+    _save(out_dir, "cond", cond.numpy())
+    _save(out_dir, "out", y.numpy())
+    print(f"[dit_full] DiT.forward x{tuple(x.shape)} -> {tuple(y.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -326,6 +378,7 @@ DUMPERS = {
     "dit_mods": dump_dit_mods,
     "dit_block": dump_dit_block,
     "dit_wn": dump_dit_wn,
+    "dit_full": dump_dit_full,
 }
 
 
