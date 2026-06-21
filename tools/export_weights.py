@@ -123,6 +123,16 @@ def export_campplus(out_base):
     print(f"[campplus] exported {n} tensors -> {out_dir}")
 
 
+def export_t2s(out_base):
+    import safetensors.torch
+    from huggingface_hub import hf_hub_download
+    f = hf_hub_download("netease-youdao/Confucius4-TTS", filename="t2s_model.safetensors")
+    sd = safetensors.torch.load_file(f, device="cpu")
+    out_dir = os.path.join(out_base, "t2s")
+    n = export_state_dict(sd, out_dir)
+    print(f"[t2s] exported {n} tensors -> {out_dir}")
+
+
 def export_audio(out_base):
     # Baked mel constants for the 22.05 kHz reference-mel front end.
     from librosa.filters import mel as librosa_mel_fn
@@ -139,6 +149,7 @@ EXPORTERS = {
     "bigvgan": export_bigvgan,
     "w2vbert": export_w2vbert,
     "campplus": export_campplus,
+    "t2s": export_t2s,
     "audio": export_audio,
 }
 
