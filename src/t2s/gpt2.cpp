@@ -23,10 +23,6 @@ Tensor gelu_new(const Tensor& x) {
                       mx::add(mx::array(1.0f), mx::tanh(inner)));
 }
 
-namespace {
-constexpr int kQuantGroup = 64;  // group size for affine weight quantization
-}  // namespace
-
 GPT2::GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
            int n_head)
     : w_(w), p_(prefix), n_layer_(n_layer), n_head_(n_head) {
@@ -39,6 +35,15 @@ GPT2::GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
     const int bits = std::atoi(q);
     if (bits == 4 || bits == 8) quant_bits_ = bits;
   }
+  // Affine group size. 64 is MLX's well-supported default and measured best
+  // for both widths here (group 32 was empirically *worse* for 4-bit on these
+  // weights). Override with C4TTS_QUANT_GROUP (must divide the projection
+  // in-features 1280 and 5120, e.g. 32/64/128).
+  quant_group_ = 64;
+  if (const char* g = std::getenv("C4TTS_QUANT_GROUP")) {
+    const int gs = std::atoi(g);
+    if (gs >= 32 && (1280 % gs == 0) && (5120 % gs == 0)) quant_group_ = gs;
+  }
 }
 
 // GPT-2 Conv1D projection y = x @ W (+ b). Optionally quantized (int4/int8) or
@@ -50,11 +55,11 @@ Tensor GPT2::proj(const Tensor& x, const std::string& name) const {
     auto it = quant_cache_.find(name);
     if (it == quant_cache_.end()) {
       Tensor wt = mx::transpose(w_.get(name + ".weight"));  // (out, in)
-      it = quant_cache_.emplace(name, mx::quantize(wt, kQuantGroup, quant_bits_)).first;
+      it = quant_cache_.emplace(name, mx::quantize(wt, quant_group_, quant_bits_)).first;
     }
     const std::vector<Tensor>& q = it->second;  // [w_q, scales, biases]
     Tensor y = mx::quantized_matmul(x, q[0], q[1], q[2], /*transpose=*/true,
-                                    kQuantGroup, quant_bits_);
+                                    quant_group_, quant_bits_);
     return mx::add(y, b);
   }
   Tensor w = w_.get(name + ".weight");

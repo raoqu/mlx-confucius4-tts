@@ -138,9 +138,14 @@ Performance (env vars, honored by both `synth` and the server):
   weights (¼ the bytes of fp32) roughly **halve the T2S stage** (~2×) — the
   largest win available, pulling overall RTF from ~0.9 to ~0.6 on long clips.
   Logit fidelity stays at cosine 0.9999 (tokens preserved); when token counts
-  align the output waveform matches fp32 at cosine 0.99995. `C4TTS_QUANT=4`
-  (4-bit) is marginally faster but noticeably lossier (logit cosine ~0.97) and
-  not recommended.
+  align the output waveform matches fp32 at cosine 0.99995.
+- `C4TTS_QUANT=4` — 4-bit. Only ~7% faster than 8-bit (the decode is already
+  near bandwidth-satisfied at 8-bit) but markedly lossier: logit cosine ~0.97,
+  and the semantic token stream drifts enough to change output length ±20%.
+  Use only if you need the last few percent and have verified quality on your
+  text; **8-bit is the recommended setting.** Tune the affine group size with
+  `C4TTS_QUANT_GROUP` (default 64; must divide 1280 and 5120, e.g. 32/64/128 —
+  64 measured best for both widths here).
 - `C4TTS_FP16=1` — run the same projection matmuls in float16 (smaller win,
   ~1.1×; superseded by `C4TTS_QUANT=8`). Ignored when `C4TTS_QUANT` is set.
 - `C4TTS_TIMING=1` — print per-stage timings (prompt / t2s / s2a / bigvgan).
