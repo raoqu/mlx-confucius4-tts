@@ -57,6 +57,19 @@ target_include_directories(c4tts_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 target_link_libraries(c4tts_core PUBLIC mlx)
 
 # ---------------------------------------------------------------------------
+# SQLite — backs the web server's voice store (voices.sqlite). Ships with the
+# macOS SDK; prefer the CMake-provided target, fall back to plain -lsqlite3.
+# ---------------------------------------------------------------------------
+find_package(SQLite3 QUIET)
+if(TARGET SQLite3::SQLite3)
+  target_link_libraries(c4tts_core PUBLIC SQLite3::SQLite3)
+elseif(SQLite3_FOUND)
+  target_link_libraries(c4tts_core PUBLIC SQLite::SQLite3)
+else()
+  target_link_libraries(c4tts_core PUBLIC sqlite3)
+endif()
+
+# ---------------------------------------------------------------------------
 # CLI entry point.
 # ---------------------------------------------------------------------------
 add_executable(c4tts_cli apps/c4tts_cli.cpp)

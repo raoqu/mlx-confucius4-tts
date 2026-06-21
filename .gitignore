@@ -16,6 +16,10 @@ golden
 # Generated audio
 *.wav
 
+# Web server runtime state (voice store + synthesis scratch)
+voices/
+outputs/
+
 # Python caches
 __pycache__/
 *.pyc

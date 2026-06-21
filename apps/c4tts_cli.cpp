@@ -18,6 +18,7 @@
 
 #include "c4tts/lang_tokens.h"
 #include "c4tts/pipeline.h"
+#include "c4tts/server.h"
 #include "c4tts/tokenizer.h"
 #include "c4tts/wav_io.h"
 #include "mlx/mlx.h"
@@ -45,6 +46,12 @@ std::string arg(int argc, char** argv, const std::string& key,
   for (int i = 1; i < argc - 1; ++i)
     if (key == argv[i]) return argv[i + 1];
   return dflt;
+}
+
+bool has_flag(int argc, char** argv, const std::string& key) {
+  for (int i = 1; i < argc; ++i)
+    if (key == argv[i]) return true;
+  return false;
 }
 
 // Default model directory: <repo>/bin, resolved relative to the executable
@@ -131,10 +138,56 @@ int synth(int argc, char** argv) {
   std::cout << "c4tts: wrote " << out << "\n";
   return 0;
 }
+
+// HTTP server + web admin. Mirrors index-tts2-metal's --web/--server modes:
+//   c4tts_cli --server [--host H] [--port P] [--weights DIR] [--voice-store DIR]
+//   c4tts_cli --web    [--web-key KEY] [--host H] [--port P] ...
+// --web implies --server and additionally serves the web console at /web.
+int serve(int argc, char** argv) {
+  std::string weights = arg(argc, argv, "--weights");
+  if (weights.empty()) weights = arg(argc, argv, "--weight");
+  if (weights.empty()) weights = default_weights_dir();
+
+  const std::string host = arg(argc, argv, "--host", "127.0.0.1");
+  std::string port_str = arg(argc, argv, "--port");
+  uint16_t port = 3456;
+  if (!port_str.empty()) {
+    const long n = std::stol(port_str);
+    if (n < 1 || n > 65535) {
+      std::cerr << "c4tts: --port must be 1-65535 (got " << n << ")\n";
+      return 2;
+    }
+    port = static_cast<uint16_t>(n);
+  }
+
+  std::string voice_store = arg(argc, argv, "--voice-store");
+  if (voice_store.empty()) voice_store = arg(argc, argv, "--voice_store");
+
+  // --web-key (alias --webkey) supplies the admin key.
+  std::string web_key = arg(argc, argv, "--web-key");
+  if (web_key.empty()) web_key = arg(argc, argv, "--webkey");
+
+  std::string queue_str = arg(argc, argv, "--queue-size");
+  if (queue_str.empty()) queue_str = arg(argc, argv, "--queue_size");
+  uint32_t queue_size = 0;
+  if (!queue_str.empty()) queue_size = static_cast<uint32_t>(std::stoul(queue_str));
+
+  const std::string lang = arg(argc, argv, "--lang", "zh");
+  const bool web_enabled = has_flag(argc, argv, "--web");
+  const bool verbose = has_flag(argc, argv, "--verbose") || has_flag(argc, argv, "-V");
+
+  return c4::server::run_server(host, port, weights, voice_store, queue_size,
+                                web_enabled, web_key, lang, verbose);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   if (argc >= 2 && std::strcmp(argv[1], "synth") == 0) return synth(argc, argv);
+  // Server mode: `serve` subcommand, or --web/--server anywhere in the args.
+  if ((argc >= 2 && std::strcmp(argv[1], "serve") == 0) ||
+      has_flag(argc, argv, "--web") || has_flag(argc, argv, "--server")) {
+    return serve(argc, argv);
+  }
   if (argc >= 2 && (std::strcmp(argv[1], "--version") == 0 ||
                     std::strcmp(argv[1], "-v") == 0)) {
     std::cout << kVersion << std::endl;
