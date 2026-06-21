@@ -49,6 +49,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -565,16 +566,21 @@ struct Engine {
     Pipeline pipeline;
     Tokenizer tokenizer;
     std::string default_lang;
+    size_t lru_capacity;  // per-voice conditioning cache capacity (0 disables)
 
-    Engine(const std::string& weights_dir, const std::string& lang)
+    Engine(const std::string& weights_dir, const std::string& lang, size_t lru_cap)
         : pipeline(weights_dir),
           tokenizer(weights_dir + "/tokenizer/vocab.tsv"),
-          default_lang(lang) {}
+          default_lang(lang),
+          lru_capacity(lru_cap) {}
 
-    // Synthesizes `text` with the reference WAV at `prompt_wav_path`. Writes a
-    // 16-bit PCM WAV to `out_wav` and returns its byte length divided into the
-    // produced audio seconds via the caller.
-    void synth_to_file(const std::string& prompt_wav_path,
+    // Synthesizes `text` with the reference WAV at `prompt_wav_path`. The
+    // extracted conditioning (W2V-BERT semantics, CAMPPlus style, ref mel) is
+    // cached per voice in an LRU keyed by `voice_key` + the wav's size/mtime,
+    // so repeated requests for the same voice skip feature extraction. Writes a
+    // 16-bit PCM WAV to `out_wav`. Single-worker-thread only (no locking).
+    void synth_to_file(const std::string& voice_key,
+                       const std::string& prompt_wav_path,
                        const std::string& text,
                        const std::string& lang,
                        int steps,
@@ -586,9 +592,43 @@ struct Engine {
         const std::string formatted = format_tts_text(text, lang.empty() ? default_lang : lang);
         std::vector<int> ids = tokenizer.encode(formatted, /*add_bos=*/true, /*add_eos=*/true);
         if (ids.empty()) throw std::runtime_error("tokenizer produced no token ids");
-        Tensor wav = pipeline.synth(prompt_wav_path, ids, opt);
+
+        Tensor wav = lru_capacity == 0
+            ? pipeline.synth(prompt_wav_path, ids, opt)
+            : pipeline.synth(prompt_for(voice_key, prompt_wav_path), ids, opt);
         write_wav(out_wav, wav, kSampleRate);
     }
+
+private:
+    // Cache key folds in the wav's size+mtime so editing a voice's audio (same
+    // id) invalidates the entry.
+    static std::string cache_key(const std::string& voice_key, const std::string& wav) {
+        std::error_code ec;
+        const auto sz = static_cast<unsigned long long>(fs::file_size(wav, ec));
+        const auto wt = static_cast<long long>(
+            fs::last_write_time(wav, ec).time_since_epoch().count());
+        return voice_key + "|" + std::to_string(sz) + "|" + std::to_string(wt);
+    }
+
+    const Pipeline::Prompt& prompt_for(const std::string& voice_key,
+                                       const std::string& wav) {
+        const std::string key = cache_key(voice_key, wav);
+        auto it = index_.find(key);
+        if (it != index_.end()) {
+            lru_.splice(lru_.begin(), lru_, it->second);  // move to front (MRU)
+            return it->second->second;
+        }
+        lru_.emplace_front(key, pipeline.make_prompt(wav));
+        index_[key] = lru_.begin();
+        while (lru_.size() > lru_capacity) {
+            index_.erase(lru_.back().first);
+            lru_.pop_back();
+        }
+        return lru_.front().second;
+    }
+
+    std::list<std::pair<std::string, Pipeline::Prompt>> lru_;
+    std::unordered_map<std::string, decltype(lru_)::iterator> index_;
 };
 
 // ---------------------------------------------------------------------------
@@ -1049,6 +1089,7 @@ struct ServerConfig {
     std::string weights_dir = "bin";
     std::string voice_store_dir = "voices";
     uint32_t queue_size = 16;
+    uint32_t lru_capacity = 3;  // per-voice conditioning cache (0 disables)
     bool web_enabled = false;
     std::string web_key;
     std::string lang = "zh";
@@ -1288,8 +1329,11 @@ void handle_speech(int fd,
         // Runs on the single worker thread, so the resident pipeline is only
         // ever touched by one thread at a time.
         try {
-            engine.synth_to_file(prompt_wav, input, lang, steps, max_tokens, out_wav);
+            engine.synth_to_file(voice_rec->id, prompt_wav, input, lang, steps, max_tokens, out_wav);
         } catch (const std::exception& e) {
+            // Free MLX's reclaimable buffer cache even on failure (held voices
+            // in the LRU survive — they are referenced, not cached buffers).
+            mx::clear_cache();
             task_error = e.what();
             return false;
         }
@@ -1297,6 +1341,9 @@ void handle_speech(int fd,
         event.audio_seconds = wav_bytes.size() > 44
             ? static_cast<double>(wav_bytes.size() - 44) / 2.0 / kSampleRate
             : 0.0;
+        // Release the per-request scratch buffers MLX cached for this sequence
+        // length so memory doesn't climb as output lengths vary across requests.
+        mx::clear_cache();
         return true;
     }, error);
 
@@ -1529,6 +1576,7 @@ int run_server(const std::string& host,
                const std::string& weights_dir,
                const std::string& voice_store_dir,
                uint32_t queue_size,
+               uint32_t lru_capacity,
                bool web_enabled,
                const std::string& web_key,
                const std::string& lang,
@@ -1542,15 +1590,21 @@ int run_server(const std::string& host,
     cfg.voice_store_dir = voice_store_dir.empty()
         ? env_string("C4TTS_VOICE_STORE", "voices") : voice_store_dir;
     cfg.queue_size = queue_size == 0 ? env_u32("C4TTS_QUEUE_SIZE", 16, 1, 10000) : queue_size;
+    cfg.lru_capacity = lru_capacity == UINT32_MAX
+        ? env_u32("C4TTS_LRU_CACHE", 3, 0, 64) : lru_capacity;
     cfg.web_enabled = web_enabled;
     cfg.web_key = web_key.empty() ? env_string("C4TTS_WEBKEY", "") : web_key;
     cfg.lang = lang.empty() ? "zh" : lang;
     cfg.verbose = verbose;
 
+    // Bound MLX's reclaimable Metal buffer cache so RSS doesn't climb as
+    // per-request scratch buffers accumulate across varying sequence lengths.
+    mx::set_cache_limit(256ull << 20);  // 256 MB
+
     std::cerr << ">> c4tts: loading weights from " << cfg.weights_dir << " ..." << std::endl;
     std::unique_ptr<Engine> engine;
     try {
-        engine = std::make_unique<Engine>(cfg.weights_dir, cfg.lang);
+        engine = std::make_unique<Engine>(cfg.weights_dir, cfg.lang, cfg.lru_capacity);
     } catch (const std::exception& e) {
         std::cerr << "error: failed to load model from " << cfg.weights_dir << ": " << e.what() << std::endl;
         return 1;
@@ -1588,7 +1642,8 @@ int run_server(const std::string& host,
         std::cerr << ">> web admin: http://" << host << ":" << port << "/web"
                   << (cfg.web_key.empty() ? "  (no web key configured)" : "") << std::endl;
     }
-    std::cerr << ">> voice store: " << cfg.voice_store_dir << " queue_size=" << cfg.queue_size << std::endl;
+    std::cerr << ">> voice store: " << cfg.voice_store_dir << " queue_size=" << cfg.queue_size
+              << " lrucache=" << cfg.lru_capacity << std::endl;
 
     std::atomic<uint64_t> request_counter{0};
     std::thread accept_thread([&] {

@@ -128,8 +128,18 @@ every request.
 Flags: `--web` (serve the console), `--server` (API only), `--web-key KEY`
 (admin key for the console and its `/web/api/*` routes; env `C4TTS_WEBKEY`),
 `--host` (default `127.0.0.1`), `--port` (default `3456`), `--weights DIR`
-(default `bin/`), `--voice-store DIR` (default `voices/`), `--lang` (default
-`zh`), `--queue-size N`.
+(default `bin/`), `--voice-store DIR`, `--lang` (default `zh`), `--queue-size N`,
+`--lrucache N`.
+
+- `--voice-store DIR` defaults to `<exe>/../voices` (anchored to the binary, not
+  the working directory), so created voices persist regardless of where the
+  server is launched from. Metadata lives in `<store>/voices.sqlite`.
+- `--lrucache N` (default 3, 0 disables; env `C4TTS_LRU_CACHE`) caches the
+  extracted conditioning (W2V-BERT semantics / CAMPPlus style / mel) per voice,
+  so repeated requests for the same voice skip feature extraction (saves the
+  prompt stage, which scales with reference length — e.g. ~230 ms for a 15 s
+  reference). The server also bounds MLX's Metal buffer cache so memory stays
+  flat across many requests of varying length.
 
 Performance (env vars, honored by both `synth` and the server):
 

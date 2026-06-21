@@ -55,17 +55,31 @@ bool has_flag(int argc, char** argv, const std::string& key) {
   return false;
 }
 
-// Default model directory: <repo>/bin, resolved relative to the executable
-// (<repo>/build/c4tts_cli) so it works regardless of the current dir.
-std::string default_weights_dir() {
+// Directory holding the executable (resolved via the Mach-O image path), or
+// empty on failure. Lets defaults anchor to the install location, not the CWD.
+std::string exe_dir() {
   char buf[PATH_MAX];
   uint32_t sz = sizeof(buf);
   if (_NSGetExecutablePath(buf, &sz) == 0) {
     std::string p(buf);
     auto slash = p.find_last_of('/');
-    if (slash != std::string::npos) return p.substr(0, slash) + "/../bin";
+    if (slash != std::string::npos) return p.substr(0, slash);
   }
-  return "bin";
+  return "";
+}
+
+// Default model directory: <repo>/bin, resolved relative to the executable
+// (<repo>/build/c4tts_cli) so it works regardless of the current dir.
+std::string default_weights_dir() {
+  const std::string d = exe_dir();
+  return d.empty() ? "bin" : d + "/../bin";
+}
+
+// Default voice store: <repo>/voices, anchored to the executable so voices
+// persist regardless of the working directory the server is launched from.
+std::string default_voice_store() {
+  const std::string d = exe_dir();
+  return d.empty() ? "voices" : d + "/../voices";
 }
 
 int synth(int argc, char** argv) {
@@ -163,6 +177,7 @@ int serve(int argc, char** argv) {
 
   std::string voice_store = arg(argc, argv, "--voice-store");
   if (voice_store.empty()) voice_store = arg(argc, argv, "--voice_store");
+  if (voice_store.empty()) voice_store = default_voice_store();  // stable, CWD-independent
 
   // --web-key (alias --webkey) supplies the admin key.
   std::string web_key = arg(argc, argv, "--web-key");
@@ -173,12 +188,18 @@ int serve(int argc, char** argv) {
   uint32_t queue_size = 0;
   if (!queue_str.empty()) queue_size = static_cast<uint32_t>(std::stoul(queue_str));
 
+  // --lrucache N: per-voice conditioning cache capacity (0 disables). Unset
+  // (UINT32_MAX) falls back to the C4TTS_LRU_CACHE env / default of 3.
+  std::string lru_str = arg(argc, argv, "--lrucache");
+  uint32_t lru_capacity = UINT32_MAX;
+  if (!lru_str.empty()) lru_capacity = static_cast<uint32_t>(std::stoul(lru_str));
+
   const std::string lang = arg(argc, argv, "--lang", "zh");
   const bool web_enabled = has_flag(argc, argv, "--web");
   const bool verbose = has_flag(argc, argv, "--verbose") || has_flag(argc, argv, "-V");
 
   return c4::server::run_server(host, port, weights, voice_store, queue_size,
-                                web_enabled, web_key, lang, verbose);
+                                lru_capacity, web_enabled, web_key, lang, verbose);
 }
 }  // namespace
 

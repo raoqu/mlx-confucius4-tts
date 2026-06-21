@@ -29,11 +29,14 @@ const char* web_index_html();
 // `web_key` is non-empty the console and its /web/api/* routes require it.
 // `lang` is the default synthesis language code used to wrap input text in
 // the model's prompt format. Returns a process exit code.
+// `lru_capacity` bounds the per-voice conditioning cache (0 disables it; pass
+// UINT32_MAX to fall back to the C4TTS_LRU_CACHE env / default of 3).
 int run_server(const std::string& host,
                uint16_t port,
                const std::string& weights_dir,
                const std::string& voice_store_dir,
                uint32_t queue_size,
+               uint32_t lru_capacity,
                bool web_enabled,
                const std::string& web_key,
                const std::string& lang,

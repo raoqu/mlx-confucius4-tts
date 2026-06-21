@@ -54,6 +54,13 @@ class Pipeline {
                const std::vector<int>& text_token_ids,
                const SynthOptions& opt = {}) const;
 
+  // Synthesis from already-extracted conditioning — lets callers (e.g. the
+  // server) cache the Prompt per voice and skip re-running the W2V-BERT /
+  // CAMPPlus / mel feature extraction on every request.
+  Tensor synth(const Prompt& prompt,
+               const std::vector<int>& text_token_ids,
+               const SynthOptions& opt = {}) const;
+
   int sample_rate() const { return 22050; }
 
  private:

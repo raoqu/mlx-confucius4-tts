@@ -74,7 +74,12 @@ Tensor Pipeline::synth(const std::string& path,
   Stage tp("prompt");
   Prompt p = make_prompt(path);
   tp.done(p.semantic);
+  return synth(p, text_token_ids, opt);
+}
 
+Tensor Pipeline::synth(const Prompt& p,
+                       const std::vector<int>& text_token_ids,
+                       const SynthOptions& opt) const {
   // Text token ids -> (1, T_text) int32.
   const int n = static_cast<int>(text_token_ids.size());
   int32_t* heap = new int32_t[n > 0 ? n : 1];
