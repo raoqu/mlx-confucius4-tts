@@ -171,10 +171,73 @@ def dump_s2a_lr(out_base):
     print(f"[s2a_lr] x{tuple(x.shape)} -> {tuple(out.shape)} ; {out_dir}")
 
 
+def dump_dit_mods(out_base):
+    """DiT building blocks (E3a): TimestepEmbedding, AdaptiveLayerNorm,
+    FeedForward, and RoPE precompute/apply."""
+    from confuciustts.flow.DiT.modules import (
+        TimestepEmbedding, AdaptiveLayerNorm, FeedForward,
+        precompute_freqs_cis, apply_rotary_emb,
+    )
+
+    out_dir = os.path.join(out_base, "dit_mods")
+    H = 64
+
+    # TimestepEmbedding
+    torch.manual_seed(3)
+    te = TimestepEmbedding(H).eval()
+    t = torch.rand(2)
+    with torch.no_grad():
+        te_out = te(t)
+    _save(out_dir, "te.time_mlp.0.weight", te.time_mlp[0].weight.detach().numpy())
+    _save(out_dir, "te.time_mlp.0.bias", te.time_mlp[0].bias.detach().numpy())
+    _save(out_dir, "te.time_mlp.2.weight", te.time_mlp[2].weight.detach().numpy())
+    _save(out_dir, "te.time_mlp.2.bias", te.time_mlp[2].bias.detach().numpy())
+    _save(out_dir, "te_t", t.numpy())
+    _save(out_dir, "te_out", te_out.numpy())
+
+    # AdaptiveLayerNorm
+    torch.manual_seed(4)
+    aln = AdaptiveLayerNorm(H).eval()
+    ax = torch.randn(2, 7, H)
+    acond = torch.randn(2, H)
+    with torch.no_grad():
+        aln_out = aln(ax, acond)
+    _save(out_dir, "aln.norm.weight", aln.norm.weight.detach().numpy())
+    _save(out_dir, "aln.modulation.weight", aln.modulation.weight.detach().numpy())
+    _save(out_dir, "aln.modulation.bias", aln.modulation.bias.detach().numpy())
+    _save(out_dir, "aln_x", ax.numpy())
+    _save(out_dir, "aln_cond", acond.numpy())
+    _save(out_dir, "aln_out", aln_out.numpy())
+
+    # FeedForward (SwiGLU)
+    torch.manual_seed(5)
+    ff = FeedForward(H, H * 3).eval()
+    fx = torch.randn(2, 7, H)
+    with torch.no_grad():
+        ff_out = ff(fx)
+    _save(out_dir, "ff.w1.weight", ff.w1.weight.detach().numpy())
+    _save(out_dir, "ff.w2.weight", ff.w2.weight.detach().numpy())
+    _save(out_dir, "ff.w3.weight", ff.w3.weight.detach().numpy())
+    _save(out_dir, "ff_x", fx.numpy())
+    _save(out_dir, "ff_out", ff_out.numpy())
+
+    # RoPE: precompute + apply (head_dim=16, T=7, heads=4)
+    T, heads, head_dim = 7, 4, 16
+    fc = precompute_freqs_cis(T, head_dim, base=10000, dtype=torch.float32)
+    rx = torch.randn(2, T, heads, head_dim)
+    rope_out = apply_rotary_emb(rx, fc)
+    _save(out_dir, "rope_fc", fc.numpy())
+    _save(out_dir, "rope_x", rx.numpy())
+    _save(out_dir, "rope_out", rope_out.numpy())
+
+    print(f"[dit_mods] TimestepEmbedding/AdaLN/FeedForward/RoPE -> {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
     "s2a_lr": dump_s2a_lr,
+    "dit_mods": dump_dit_mods,
 }
 
 
