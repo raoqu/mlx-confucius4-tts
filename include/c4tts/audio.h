@@ -23,6 +23,12 @@ struct MelConfig {
 // Reflects without repeating the edge sample (requires pad < len(x)).
 Tensor reflect_pad1d(const Tensor& x, int pad);
 
+// Windowed-sinc resampling, matching torchaudio.functional.resample defaults
+// (sinc_interp_hann, lowpass_filter_width=6, rolloff=0.99).
+//   wav: (T,) at orig_freq -> (ceil(T*new/orig),) at new_freq.
+Tensor resample(const Tensor& wav, int orig_freq, int new_freq,
+                int lowpass_filter_width = 6, float rolloff = 0.99f);
+
 // Kaldi-compatible log-mel filterbank, matching
 // torchaudio.compliance.kaldi.fbank(num_mel_bins=80, sample_frequency=16000,
 // dither=0.0) with default povey window / preemphasis 0.97 / snip_edges.

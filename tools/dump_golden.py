@@ -736,6 +736,21 @@ def dump_seamless(out_base):
     print(f"[seamless] wav{wav.shape} -> {feats.shape} ; {out_dir}")
 
 
+def dump_resample(out_base):
+    """Resample (B1): torchaudio.functional.resample parity."""
+    import torchaudio
+
+    out_dir = os.path.join(out_base, "resample")
+    torch.manual_seed(49)
+    wav = torch.randn(4000) * 0.1  # source at 24 kHz
+    r16 = torchaudio.functional.resample(wav, 24000, 16000)
+    r22 = torchaudio.functional.resample(wav, 24000, 22050)
+    _save(out_dir, "wav", wav.numpy())
+    _save(out_dir, "r16", r16.numpy())
+    _save(out_dir, "r22", r22.numpy())
+    print(f"[resample] 24k{tuple(wav.shape)} -> 16k{tuple(r16.shape)} 22k{tuple(r22.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -755,6 +770,7 @@ DUMPERS = {
     "w2vbert": dump_w2vbert,
     "fbank": dump_fbank,
     "seamless": dump_seamless,
+    "resample": dump_resample,
 }
 
 
