@@ -85,5 +85,71 @@ Tensor apply_rotary_emb(const Tensor& x_in, const Tensor& freqs_cis) {
   return mx::astype(out, x_in.dtype());
 }
 
+Tensor attention(const Tensor& x, const Tensor& wqkv, const Tensor& wo,
+                 const Tensor& freqs_cis, int num_heads, const Tensor* mask) {
+  const int B = x.shape(0), T = x.shape(1), dim = x.shape(2);
+  const int head_dim = dim / num_heads;
+
+  Tensor qkv = nn::linear(x, wqkv);          // (B, T, 3*dim)
+  auto parts = mx::split(qkv, 3, /*axis=*/2);
+  Tensor q = mx::reshape(parts[0], {B, T, num_heads, head_dim});
+  Tensor k = mx::reshape(parts[1], {B, T, num_heads, head_dim});
+  Tensor v = mx::reshape(parts[2], {B, T, num_heads, head_dim});
+
+  q = apply_rotary_emb(q, freqs_cis);
+  k = apply_rotary_emb(k, freqs_cis);
+
+  q = mx::transpose(q, {0, 2, 1, 3});        // (B, H, T, head_dim)
+  k = mx::transpose(k, {0, 2, 1, 3});
+  v = mx::transpose(v, {0, 2, 1, 3});
+
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+  Tensor scores = mx::multiply(
+      mx::matmul(q, mx::swapaxes(k, -1, -2)), mx::array(scale));  // (B,H,T,T)
+  if (mask) {
+    // mask (B,1,1,T) bool, True=attend; masked positions -> large negative.
+    Tensor neg = mx::array(-1e9f);
+    scores = mx::where(*mask, scores, neg);
+  }
+  Tensor attn = mx::softmax(scores, /*axis=*/-1);
+  Tensor out = mx::matmul(attn, v);          // (B, H, T, head_dim)
+  out = mx::reshape(mx::transpose(out, {0, 2, 1, 3}), {B, T, dim});
+  return nn::linear(out, wo);
+}
+
+DiTBlock::DiTBlock(const WeightStore& w, const std::string& prefix,
+                   int num_heads)
+    : w_(w), p_(prefix), num_heads_(num_heads) {}
+
+Tensor DiTBlock::forward(const Tensor& x_in, const Tensor& cond,
+                         const Tensor& freqs_cis, const Tensor* mask,
+                         const Tensor* skip_in) const {
+  Tensor x = x_in;
+  if (skip_in) {
+    Tensor sw = w_.get(p_ + "skip_in_linear.weight");
+    Tensor sb = w_.get(p_ + "skip_in_linear.bias");
+    x = nn::linear(mx::concatenate({x, *skip_in}, -1), sw, &sb);
+  }
+
+  // h = x + attention(attention_norm(x, cond))
+  Tensor an_w = w_.get(p_ + "attention_norm.norm.weight");
+  Tensor an_mw = w_.get(p_ + "attention_norm.modulation.weight");
+  Tensor an_mb = w_.get(p_ + "attention_norm.modulation.bias");
+  Tensor normed = adaptive_layer_norm(x, cond, an_w, an_mw, an_mb);
+  Tensor wqkv = w_.get(p_ + "attention.wqkv.weight");
+  Tensor wo = w_.get(p_ + "attention.wo.weight");
+  Tensor h = mx::add(x, attention(normed, wqkv, wo, freqs_cis, num_heads_, mask));
+
+  // return h + feed_forward(ffn_norm(h, cond))
+  Tensor fn_w = w_.get(p_ + "ffn_norm.norm.weight");
+  Tensor fn_mw = w_.get(p_ + "ffn_norm.modulation.weight");
+  Tensor fn_mb = w_.get(p_ + "ffn_norm.modulation.bias");
+  Tensor fnormed = adaptive_layer_norm(h, cond, fn_w, fn_mw, fn_mb);
+  Tensor w1 = w_.get(p_ + "feed_forward.w1.weight");
+  Tensor w2 = w_.get(p_ + "feed_forward.w2.weight");
+  Tensor w3 = w_.get(p_ + "feed_forward.w3.weight");
+  return mx::add(h, feed_forward(fnormed, w1, w2, w3));
+}
+
 }  // namespace dit
 }  // namespace c4

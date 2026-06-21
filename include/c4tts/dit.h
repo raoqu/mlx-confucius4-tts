@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <string>
+
 #include "c4tts/tensor.h"
+#include "c4tts/weights.h"
 
 namespace c4 {
 namespace dit {
@@ -35,6 +38,28 @@ Tensor precompute_freqs_cis(int seq_len, int head_dim, float base = 10000.0f);
 // Apply rotary embedding to x (B, T, H, head_dim) using freqs_cis (T, hd/2, 2).
 // Computed in float32, matching flow/DiT/modules.py:apply_rotary_emb.
 Tensor apply_rotary_emb(const Tensor& x, const Tensor& freqs_cis);
+
+// Multi-head self-attention with RoPE (flow/DiT/modules.py:Attention).
+//   x: (B, T, dim); wqkv: (3*dim, dim); wo: (dim, dim) (both no-bias).
+//   freqs_cis: (T, head_dim/2, 2). mask: optional (B,1,1,T) bool (True=attend).
+Tensor attention(const Tensor& x, const Tensor& wqkv, const Tensor& wo,
+                 const Tensor& freqs_cis, int num_heads,
+                 const Tensor* mask = nullptr);
+
+// DiTBlock (flow/DiT/modules.py:DiTBlock): pre-AdaLN attention + SwiGLU FFN,
+// with an optional U-Net skip input concatenated and projected first.
+class DiTBlock {
+ public:
+  DiTBlock(const WeightStore& w, const std::string& prefix, int num_heads);
+  Tensor forward(const Tensor& x, const Tensor& cond, const Tensor& freqs_cis,
+                 const Tensor* mask = nullptr,
+                 const Tensor* skip_in = nullptr) const;
+
+ private:
+  const WeightStore& w_;
+  std::string p_;
+  int num_heads_;
+};
 
 }  // namespace dit
 }  // namespace c4

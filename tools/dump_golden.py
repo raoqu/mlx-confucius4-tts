@@ -233,11 +233,50 @@ def dump_dit_mods(out_base):
     print(f"[dit_mods] TimestepEmbedding/AdaLN/FeedForward/RoPE -> {out_dir}")
 
 
+def dump_dit_block(out_base):
+    """DiT E3b: Attention and DiTBlock."""
+    from confuciustts.flow.DiT.modules import (
+        Attention, DiTBlock, precompute_freqs_cis,
+    )
+
+    out_dir = os.path.join(out_base, "dit_block")
+    dim, heads, T = 64, 4, 9
+    head_dim = dim // heads
+    fc = precompute_freqs_cis(T, head_dim, base=10000, dtype=torch.float32)
+    _save(out_dir, "freqs_cis", fc.numpy())
+
+    # Attention (no mask)
+    torch.manual_seed(6)
+    attn = Attention(dim, heads).eval()
+    ax = torch.randn(2, T, dim)
+    with torch.no_grad():
+        ao = attn(ax, None, fc)
+    _save(out_dir, "attn.wqkv.weight", attn.wqkv.weight.detach().numpy())
+    _save(out_dir, "attn.wo.weight", attn.wo.weight.detach().numpy())
+    _save(out_dir, "attn_x", ax.numpy())
+    _save(out_dir, "attn_out", ao.numpy())
+
+    # DiTBlock (no skip, no mask)
+    torch.manual_seed(7)
+    blk = DiTBlock(dim, heads, dim * 3).eval()
+    bx = torch.randn(2, T, dim)
+    cond = torch.randn(2, dim)
+    with torch.no_grad():
+        bo = blk(bx, cond, None, fc, None)
+    _save_state_dict(out_dir, blk)  # keys: attention.*, feed_forward.*, *_norm.*
+    _save(out_dir, "blk_x", bx.numpy())
+    _save(out_dir, "blk_cond", cond.numpy())
+    _save(out_dir, "blk_out", bo.numpy())
+
+    print(f"[dit_block] Attention/DiTBlock -> {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
     "s2a_lr": dump_s2a_lr,
     "dit_mods": dump_dit_mods,
+    "dit_block": dump_dit_block,
 }
 
 

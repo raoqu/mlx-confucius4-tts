@@ -35,3 +35,5 @@ c4tts_add_test(test_nn)
 c4tts_add_test(test_weights)
 c4tts_add_test(test_s2a)
 c4tts_add_test(test_dit)
+
+c4tts_add_test(test_dit_block)
