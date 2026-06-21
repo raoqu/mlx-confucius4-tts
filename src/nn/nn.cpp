@@ -25,6 +25,18 @@ Tensor conv1d(const Tensor& x, const Tensor& weight, const Tensor* bias,
   return mx::transpose(y, {0, 2, 1});  // back to (N, Cout, Lout)
 }
 
+Tensor conv_transpose1d(const Tensor& x, const Tensor& weight,
+                        const Tensor* bias, int stride, int padding,
+                        int groups) {
+  // PyTorch (N,Cin,L)/(Cin,Cout/g,K) -> MLX (N,L,Cin)/(Cin,K,Cout/g).
+  Tensor x_nlc = mx::transpose(x, {0, 2, 1});
+  Tensor w_mlx = mx::transpose(weight, {0, 2, 1});
+  Tensor y = mx::conv_transpose1d(x_nlc, w_mlx, stride, padding, /*dilation=*/1,
+                                  /*output_padding=*/0, groups);
+  if (bias) y = mx::add(y, mx::reshape(*bias, {1, 1, -1}));
+  return mx::transpose(y, {0, 2, 1});  // (N, Cout, Lout)
+}
+
 Tensor layer_norm(const Tensor& x, const Tensor* weight, const Tensor* bias,
                   float eps) {
   const int axis = x.ndim() - 1;

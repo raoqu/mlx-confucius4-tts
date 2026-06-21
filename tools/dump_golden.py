@@ -473,6 +473,33 @@ def dump_s2a_inference(out_base):
     print(f"[s2a_infer] inference -> mel {tuple(mel.shape)} ; {out_dir}")
 
 
+def dump_vocoder_act(out_base):
+    """BigVGAN F-1: anti-aliased SnakeBeta activation."""
+    from external.bigvgan.activations import SnakeBeta
+    from external.bigvgan.alias_free_activation.torch.act import Activation1d
+
+    out_dir = os.path.join(out_base, "vocoder_act")
+    C = 16
+    torch.manual_seed(20)
+    act = Activation1d(activation=SnakeBeta(C, alpha_logscale=True)).eval()
+    with torch.no_grad():
+        act.act.alpha.copy_(torch.randn(C) * 0.3)
+        act.act.beta.copy_(torch.randn(C) * 0.3)
+    x = torch.randn(1, C, 13)
+    with torch.no_grad():
+        y = act(x)
+
+    _save(out_dir, "alpha", act.act.alpha.detach().numpy())
+    _save(out_dir, "beta", act.act.beta.detach().numpy())
+    _save(out_dir, "up_filter", act.upsample.filter.detach().view(-1).numpy())
+    _save(out_dir, "down_filter",
+          act.downsample.lowpass.filter.detach().view(-1).numpy())
+    _save(out_dir, "x", x.numpy())
+    _save(out_dir, "out", y.numpy())
+    print(f"[vocoder_act] Activation1d(SnakeBeta) x{tuple(x.shape)} -> "
+          f"{tuple(y.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -483,6 +510,7 @@ DUMPERS = {
     "dit_full": dump_dit_full,
     "cfm": dump_cfm,
     "s2a_infer": dump_s2a_inference,
+    "vocoder_act": dump_vocoder_act,
 }
 
 

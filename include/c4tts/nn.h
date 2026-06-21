@@ -21,6 +21,14 @@ Tensor linear(const Tensor& x, const Tensor& weight, const Tensor* bias = nullpt
 Tensor conv1d(const Tensor& x, const Tensor& weight, const Tensor* bias = nullptr,
               int stride = 1, int padding = 0, int dilation = 1, int groups = 1);
 
+// 1-D transposed convolution in PyTorch conventions:
+//   input:  (N, C_in, L)
+//   weight: (C_in, C_out/groups, K)
+//   output: (N, C_out, L_out)
+Tensor conv_transpose1d(const Tensor& x, const Tensor& weight,
+                        const Tensor* bias = nullptr, int stride = 1,
+                        int padding = 0, int groups = 1);
+
 // LayerNorm over the last dimension (PyTorch nn.LayerNorm with normalized_shape
 // = last dim). weight/bias optional (elementwise_affine).
 Tensor layer_norm(const Tensor& x, const Tensor* weight = nullptr,
