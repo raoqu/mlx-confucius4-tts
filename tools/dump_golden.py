@@ -497,7 +497,15 @@ def dump_s2a_inference(out_base):
     _save(out_dir, "z", z.numpy())
     _save(out_dir, "target_len", np.array([target], dtype="int64"))
     _save(out_dir, "out", mel.numpy())
-    print(f"[s2a_infer] inference -> mel {tuple(mel.shape)} ; {out_dir}")
+
+    # Back-half integration: vocode the generated mel with BigVGAN.
+    from external.bigvgan.bigvgan import BigVGAN
+    voc = BigVGAN.from_pretrained("nvidia/bigvgan_v2_22khz_80band_256x",
+                                  use_cuda_kernel=False).eval()
+    with torch.no_grad():
+        wav = voc(mel.float())  # (1, 1, T*256)
+    _save(out_dir, "wav", wav.numpy())
+    print(f"[s2a_infer] inference -> mel {tuple(mel.shape)} -> wav {tuple(wav.shape)} ; {out_dir}")
 
 
 def dump_vocoder_act(out_base):
