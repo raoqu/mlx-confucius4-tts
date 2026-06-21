@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "c4tts/tensor.h"
 #include "c4tts/weights.h"
@@ -36,6 +37,17 @@ class GPT2 {
 
 // GPT-2's gelu_new (tanh approximation).
 Tensor gelu_new(const Tensor& x);
+
+// Autoregressive sampling logits processors (HuggingFace-compatible), operating
+// in-place on a host logits vector. Used by Text2Semantic generation.
+namespace sampling {
+void temperature(std::vector<float>& logits, float temp);
+void repetition_penalty(std::vector<float>& logits,
+                        const std::vector<int>& prev_tokens, float penalty);
+void top_k(std::vector<float>& logits, int k);
+void top_p(std::vector<float>& logits, float p, int min_tokens_to_keep = 1);
+int argmax(const std::vector<float>& logits);
+}  // namespace sampling
 
 // ECAPA-TDNN speaker encoder (llm/speaker_encoder.py:Qwen3TTSSpeakerEncoder).
 // Produces the T2S condition embedding from prompt semantic features.

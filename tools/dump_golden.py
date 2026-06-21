@@ -800,6 +800,27 @@ def dump_prompt(out_base):
     print(f"[prompt] semantic{tuple(sem.shape)} style{tuple(style.shape)} ; {out_dir}")
 
 
+def dump_sampling(out_base):
+    """T2S sampling logits processors (D-4) vs HuggingFace."""
+    from transformers.generation.logits_process import (
+        TemperatureLogitsWarper, RepetitionPenaltyLogitsProcessor,
+        TopKLogitsWarper, TopPLogitsWarper)
+
+    out_dir = os.path.join(out_base, "sampling")
+    torch.manual_seed(51)
+    vocab = 64
+    logits = torch.randn(1, vocab)
+    ids = torch.tensor([[3, 7, 7, 15, 42, 3]])  # with repeats
+    _save(out_dir, "logits", logits.numpy())
+    _save(out_dir, "ids", ids.numpy().astype("int64"))
+
+    _save(out_dir, "temp", TemperatureLogitsWarper(0.8)(ids, logits.clone()).numpy())
+    _save(out_dir, "rep", RepetitionPenaltyLogitsProcessor(1.3)(ids, logits.clone()).numpy())
+    _save(out_dir, "topk", TopKLogitsWarper(10)(ids, logits.clone()).numpy())
+    _save(out_dir, "topp", TopPLogitsWarper(0.9)(ids, logits.clone()).numpy())
+    print(f"[sampling] vocab={vocab} -> {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -821,6 +842,7 @@ DUMPERS = {
     "seamless": dump_seamless,
     "resample": dump_resample,
     "prompt": dump_prompt,
+    "sampling": dump_sampling,
 }
 
 
