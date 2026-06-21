@@ -31,3 +31,4 @@ endfunction()
 
 c4tts_add_test(test_npy)
 c4tts_add_test(test_mel)
+c4tts_add_test(test_nn)
