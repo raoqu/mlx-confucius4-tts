@@ -13,9 +13,12 @@ namespace mx = mlx::core;
 Tensor gelu_new(const Tensor& x) {
   // 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
   const float c = 0.7978845608028654f;  // sqrt(2/pi)
+  // x^3 via two multiplies (cheaper than the general exp/log-based power, and
+  // this runs on the 5120-wide MLP intermediate every layer every step).
+  Tensor x3 = mx::multiply(mx::multiply(x, x), x);
   Tensor inner = mx::multiply(
       mx::array(c),
-      mx::add(x, mx::multiply(mx::array(0.044715f), mx::power(x, mx::array(3.0f)))));
+      mx::add(x, mx::multiply(mx::array(0.044715f), x3)));
   return mx::multiply(mx::multiply(mx::array(0.5f), x),
                       mx::add(mx::array(1.0f), mx::tanh(inner)));
 }
