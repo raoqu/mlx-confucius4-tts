@@ -131,11 +131,23 @@ Flags: `--web` (serve the console), `--server` (API only), `--web-key KEY`
 (default `bin/`), `--voice-store DIR` (default `voices/`), `--lang` (default
 `zh`), `--queue-size N`.
 
-Performance: set `C4TTS_FP16=1` (env, honored by both `synth` and the server)
-to run the T2S GPT-2 projection matmuls in float16. The fp32 residual stream,
-norms, attention, and sampling are preserved, so the selected tokens are
-unchanged (greedy decode is bit-stable) while decode bandwidth drops. Set
-`C4TTS_TIMING=1` to print per-stage timings (prompt / t2s / s2a / bigvgan).
+Performance (env vars, honored by both `synth` and the server):
+
+- `C4TTS_QUANT=8` — quantize the T2S GPT-2 projection weights to 8-bit (affine,
+  group 64). The M=1 autoregressive decode is weight-bandwidth-bound, so 8-bit
+  weights (¼ the bytes of fp32) roughly **halve the T2S stage** (~2×) — the
+  largest win available, pulling overall RTF from ~0.9 to ~0.6 on long clips.
+  Logit fidelity stays at cosine 0.9999 (tokens preserved); when token counts
+  align the output waveform matches fp32 at cosine 0.99995. `C4TTS_QUANT=4`
+  (4-bit) is marginally faster but noticeably lossier (logit cosine ~0.97) and
+  not recommended.
+- `C4TTS_FP16=1` — run the same projection matmuls in float16 (smaller win,
+  ~1.1×; superseded by `C4TTS_QUANT=8`). Ignored when `C4TTS_QUANT` is set.
+- `C4TTS_TIMING=1` — print per-stage timings (prompt / t2s / s2a / bigvgan).
+
+The fp32 residual stream, norms, attention, and sampling are always preserved;
+only the projection GEMVs change precision. The default (no env) path is
+bit-identical fp32.
 
 Voices are managed in SQLite (`<store>/voices.sqlite`) with reference audio
 under `<store>/samples` and c4tts voice bundles (`.pt`) under `<store>/bundles`.

@@ -59,8 +59,11 @@ class GPT2 {
   std::string p_;
   int n_layer_, n_head_;
   bool fp16_ = false;
+  int quant_bits_ = 0;  // 0 = off; 4 or 8 quantizes the projection weights
   // Cached fp16 copies of projection weights, keyed by weight name.
   mutable std::unordered_map<std::string, Tensor> half_cache_;
+  // Cached quantized projection weights: name -> [w_q, scales, biases].
+  mutable std::unordered_map<std::string, std::vector<Tensor>> quant_cache_;
 };
 
 // GPT-2's gelu_new (tanh approximation).

@@ -23,17 +23,41 @@ Tensor gelu_new(const Tensor& x) {
                       mx::add(mx::array(1.0f), mx::tanh(inner)));
 }
 
+namespace {
+constexpr int kQuantGroup = 64;  // group size for affine weight quantization
+}  // namespace
+
 GPT2::GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
            int n_head)
     : w_(w), p_(prefix), n_layer_(n_layer), n_head_(n_head) {
   const char* v = std::getenv("C4TTS_FP16");
   fp16_ = v && *v && std::strcmp(v, "0") != 0;
+  // C4TTS_QUANT=4|8 quantizes the projection weights (takes precedence over
+  // fp16). The M=1 decode GEMVs are weight-bandwidth-bound, so 8-/4-bit weights
+  // cut the dominant cost further than fp16.
+  if (const char* q = std::getenv("C4TTS_QUANT")) {
+    const int bits = std::atoi(q);
+    if (bits == 4 || bits == 8) quant_bits_ = bits;
+  }
 }
 
-// GPT-2 Conv1D projection y = x @ W (+ b), with optional fp16 matmul.
+// GPT-2 Conv1D projection y = x @ W (+ b). Optionally quantized (int4/int8) or
+// fp16; otherwise plain fp32. W is stored (in, out); quantized_matmul wants the
+// transposed (out, in) weight (it computes x @ w.T), quantized along `in`.
 Tensor GPT2::proj(const Tensor& x, const std::string& name) const {
-  Tensor w = w_.get(name + ".weight");
   Tensor b = w_.get(name + ".bias");
+  if (quant_bits_ > 0) {
+    auto it = quant_cache_.find(name);
+    if (it == quant_cache_.end()) {
+      Tensor wt = mx::transpose(w_.get(name + ".weight"));  // (out, in)
+      it = quant_cache_.emplace(name, mx::quantize(wt, kQuantGroup, quant_bits_)).first;
+    }
+    const std::vector<Tensor>& q = it->second;  // [w_q, scales, biases]
+    Tensor y = mx::quantized_matmul(x, q[0], q[1], q[2], /*transpose=*/true,
+                                    kQuantGroup, quant_bits_);
+    return mx::add(y, b);
+  }
+  Tensor w = w_.get(name + ".weight");
   if (!fp16_) return mx::add(mx::matmul(x, w), b);
   auto it = half_cache_.find(name);
   if (it == half_cache_.end()) {
