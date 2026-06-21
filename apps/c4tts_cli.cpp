@@ -9,6 +9,7 @@
 
 #include <mach-o/dyld.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +19,7 @@
 #include <vector>
 
 #include "c4tts/lang_tokens.h"
+#include "c4tts/longform.h"
 #include "c4tts/pipeline.h"
 #include "c4tts/server.h"
 #include "c4tts/tokenizer.h"
@@ -101,10 +103,12 @@ int synth(int argc, char** argv) {
   for (int i = 1; i < argc; ++i)
     if (std::strcmp(argv[i], "--raw-text") == 0) raw = true;
 
-  std::vector<int> ids;
+  // Build one token-id list per synthesis segment. Long text is split into
+  // model-sized segments (the model has fixed trained sequence lengths); each
+  // segment is tokenized with the trained prompt format + BOS/EOS. --tokens and
+  // --raw-text bypass segmentation (single, caller-controlled sequence).
+  std::vector<std::vector<int>> seg_ids;
   if (!text.empty()) {
-    // Wrap with the model's trained prompt format unless --raw-text is given,
-    // then tokenize in C++ (SentencePiece BPE) with BOS+EOS (LlamaTokenizer cfg).
     const std::string vocab_path = weights + "/tokenizer/vocab.tsv";
     std::ifstream vf(vocab_path);
     if (!vf.good()) {
@@ -113,15 +117,29 @@ int synth(int argc, char** argv) {
                    "c4tts/weights) and run ./prepare.sh\n";
       return 2;
     }
-    const std::string formatted = raw ? text : c4::format_tts_text(text, lang);
     c4::Tokenizer tok(vocab_path);
-    ids = tok.encode(formatted, /*add_bos=*/true, /*add_eos=*/true);
+    if (raw) {
+      seg_ids.push_back(tok.encode(text, /*add_bos=*/true, /*add_eos=*/true));
+    } else {
+      auto token_len = [&](const std::string& t) {
+        return static_cast<int>(tok.encode(t, false, false).size());
+      };
+      for (const auto& seg : c4::segment_text(text, lang, token_len)) {
+        seg_ids.push_back(
+            tok.encode(c4::format_tts_text(seg, lang), /*add_bos=*/true, /*add_eos=*/true));
+      }
+    }
   } else {
+    std::vector<int> ids;
     std::ifstream tf(tokens);
     int id;
     while (tf >> id) ids.push_back(id);
+    seg_ids.push_back(std::move(ids));
   }
-  if (ids.empty()) {
+  seg_ids.erase(std::remove_if(seg_ids.begin(), seg_ids.end(),
+                               [](const std::vector<int>& v) { return v.empty(); }),
+                seg_ids.end());
+  if (seg_ids.empty()) {
     std::cerr << "c4tts: no token ids\n";
     return 2;
   }
@@ -140,15 +158,23 @@ int synth(int argc, char** argv) {
 
   std::cout << "c4tts: loading weights from " << weights << " ...\n";
   c4::Pipeline pipe(weights);
+  // Extract the voice conditioning once; reuse it for every segment.
+  c4::Pipeline::Prompt cond = pipe.make_prompt(prompt);
   if (bench) {
     // Warm the weight cache so the timed run reflects compute, not first-load.
     std::cout << "c4tts: warmup pass ...\n";
-    pipe.synth(prompt, ids, opt);
+    pipe.synth(cond, seg_ids[0], opt);
   }
-  std::cout << "c4tts: synthesizing (" << ids.size() << " text tokens, "
+  std::cout << "c4tts: synthesizing (" << seg_ids.size() << " segment(s), "
             << "max_new=" << opt.max_new_tokens << ", steps=" << opt.n_timesteps
             << ", " << (opt.sample ? "sampling" : "greedy") << ") ...\n";
-  c4::Tensor wav = pipe.synth(prompt, ids, opt);
+  std::vector<c4::Tensor> waves;
+  waves.reserve(seg_ids.size());
+  for (size_t i = 0; i < seg_ids.size(); ++i) {
+    if (seg_ids.size() > 1) std::cout << "c4tts: segment " << (i + 1) << "/" << seg_ids.size() << "\n";
+    waves.push_back(pipe.synth(cond, seg_ids[i], opt));
+  }
+  c4::Tensor wav = c4::cross_fade_concat(waves, pipe.sample_rate());
   c4::write_wav(out, wav, pipe.sample_rate());
   std::cout << "c4tts: wrote " << out << "\n";
   return 0;

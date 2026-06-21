@@ -60,6 +60,7 @@
 #include <vector>
 
 #include "c4tts/lang_tokens.h"
+#include "c4tts/longform.h"
 #include "c4tts/pipeline.h"
 #include "c4tts/tokenizer.h"
 #include "c4tts/wav_io.h"
@@ -589,17 +590,43 @@ struct Engine {
         SynthOptions opt;
         if (steps > 0) opt.n_timesteps = steps;
         if (max_tokens > 0) opt.max_new_tokens = max_tokens;
-        const std::string formatted = format_tts_text(text, lang.empty() ? default_lang : lang);
-        std::vector<int> ids = tokenizer.encode(formatted, /*add_bos=*/true, /*add_eos=*/true);
-        if (ids.empty()) throw std::runtime_error("tokenizer produced no token ids");
+        const std::string l = lang.empty() ? default_lang : lang;
 
-        Tensor wav = lru_capacity == 0
-            ? pipeline.synth(prompt_wav_path, ids, opt)
-            : pipeline.synth(prompt_for(voice_key, prompt_wav_path), ids, opt);
-        write_wav(out_wav, wav, kSampleRate);
+        // Split long input into model-sized segments (the conditioning is the
+        // same for every segment, so it's extracted once and reused).
+        auto token_len = [&](const std::string& t) {
+            return static_cast<int>(tokenizer.encode(t, false, false).size());
+        };
+        const std::vector<std::string> segments = segment_text(text, l, token_len);
+
+        if (lru_capacity == 0) {
+            Pipeline::Prompt p = pipeline.make_prompt(prompt_wav_path);
+            synth_segments(p, segments, l, opt, out_wav);
+        } else {
+            synth_segments(prompt_for(voice_key, prompt_wav_path), segments, l, opt, out_wav);
+        }
     }
 
 private:
+    // Synthesizes each text segment with the shared conditioning and writes the
+    // cross-faded concatenation.
+    void synth_segments(const Pipeline::Prompt& prompt,
+                        const std::vector<std::string>& segments,
+                        const std::string& lang,
+                        const SynthOptions& opt,
+                        const std::string& out_wav) {
+        std::vector<Tensor> waves;
+        waves.reserve(segments.size());
+        for (const auto& seg : segments) {
+            std::vector<int> ids =
+                tokenizer.encode(format_tts_text(seg, lang), /*add_bos=*/true, /*add_eos=*/true);
+            if (ids.empty()) continue;
+            waves.push_back(pipeline.synth(prompt, ids, opt));
+        }
+        if (waves.empty()) throw std::runtime_error("tokenizer produced no token ids");
+        write_wav(out_wav, cross_fade_concat(waves, kSampleRate), kSampleRate);
+    }
+
     // Cache key folds in the wav's size+mtime so editing a voice's audio (same
     // id) invalidates the entry.
     static std::string cache_key(const std::string& voice_key, const std::string& wav) {

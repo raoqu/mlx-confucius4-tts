@@ -110,6 +110,12 @@ ctest --test-dir build --output-on-failure      # run the parity suite
    `--tokens ids.txt` (one id per line) is still accepted as an alternative to
    `--text` for externally tokenized input.
 
+   Long text is handled automatically: the T2S model has fixed trained sequence
+   lengths, so input is split at sentence punctuation into model-sized segments
+   (≤80 chars/tokens), each synthesized with the same voice conditioning, then
+   cross-faded together — both in `synth` and the server. (`--tokens` and
+   `--raw-text` bypass segmentation.)
+
 ## Web server & API
 
 c4tts ships an embedded HTTP server with a single-page web console and an
