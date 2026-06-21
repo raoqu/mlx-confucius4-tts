@@ -78,8 +78,17 @@ int synth(int argc, char** argv) {
   for (int i = 1; i < argc; ++i)
     if (std::strcmp(argv[i], "--greedy") == 0) opt.sample = false;
 
+  bool bench = false;
+  for (int i = 1; i < argc; ++i)
+    if (std::strcmp(argv[i], "--bench") == 0) bench = true;
+
   std::cout << "c4tts: loading weights from " << weights << " ...\n";
   c4::Pipeline pipe(weights);
+  if (bench) {
+    // Warm the weight cache so the timed run reflects compute, not first-load.
+    std::cout << "c4tts: warmup pass ...\n";
+    pipe.synth(prompt, ids, opt);
+  }
   std::cout << "c4tts: synthesizing (" << ids.size() << " text tokens, "
             << "max_new=" << opt.max_new_tokens << ", steps=" << opt.n_timesteps
             << ", " << (opt.sample ? "sampling" : "greedy") << ") ...\n";
