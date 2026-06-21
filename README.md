@@ -20,7 +20,15 @@ text → (SentencePiece) → token ids → T2S (GPT-2 + speaker enc, AR) → sem
                           S2A (length regulator → DiT flow-matching + CFG ODE) → mel → BigVGAN → wav
 ```
 
-## Status — core engine complete and parity-verified
+## Status — runs end-to-end on real weights
+
+The full pipeline runs in C++/MLX on Metal: prompt wav + text token ids →
+W2V-BERT/CAMPPlus/reference-mel → T2S (24-layer GPT-2 AR) → S2A (DiT flow
+matching + CFG) → BigVGAN → speech waveform, using the real checkpoints, with
+**no Python in the synth path** (Python is used only for one-time weight export
+and tokenization). Every stage is parity-verified against PyTorch.
+
+## Parity-verified modules
 
 Every neural stage and DSP block is ported to C++/MLX and checked against the
 PyTorch reference with golden vectors (25 test suites, all green). Headline
@@ -75,12 +83,14 @@ c4tts/
 └── tests/       per-module + integration parity tests (CTest)
 ```
 
-## Remaining frontend work
+## Remaining work
 
-The neural engine and audio DSP are complete. To make the `synth` path fully
-self-contained still requires: a vendored C++ **SentencePiece** tokenizer (text
-→ ids; currently fed via file), the multilingual **text normalizer**, and a
-finished **T2S weight export** (the 2.6 GB `t2s_model.safetensors` download +
-`export_weights.py t2s`). Performance tuning (custom Metal kernels, KV-cache for
-the T2S AR loop, quantization) is Phase H.
+The neural engine, audio DSP, and end-to-end pipeline are complete and verified
+on the real checkpoints. To make the `synth` path 100% self-contained (text in,
+no Python at all) two non-core pieces remain: a vendored C++ **SentencePiece**
+tokenizer (text → ids; currently produced upstream and fed via file) and the
+multilingual **text normalizer**. Performance is Phase H: KV-cache for the T2S
+AR loop (currently recomputed per step), custom Metal kernels for hotspots,
+weight quantization, and memory-mapped weight loading (today the engine loads
+~3.5 GB of `.npy` per run).
 ```
