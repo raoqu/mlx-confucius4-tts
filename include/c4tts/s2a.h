@@ -75,5 +75,32 @@ class ConditionalCFM {
   int mel_dim_;
 };
 
+// flow/flow.py:MaskedDiffWithXvec — top-level S2A: semantic tokens + LM latent
+// -> mel via length regulation, prompt conditioning, and the CFM ODE.
+// Dimensions are fixed to the released config (hidden 512, depth 13, 8 heads,
+// 80-band mel, 192-d speaker, wavenet 8 layers).
+class MaskedDiffWithXvec {
+ public:
+  explicit MaskedDiffWithXvec(const WeightStore& w);
+
+  // codes:      (B, T_sem) int   semantic token ids
+  // lm_latent:  (B, T_sem, 1280) T2S hidden states
+  // prompt_feat:(B, T_ref, 80)   reference mel
+  // embedding:  (B, 192)         speaker style
+  // target_len: number of mel frames to generate (excludes prompt)
+  // z:          (B, 80, T_ref+target_len) initial noise (inject for determinism)
+  // returns (B, 80, target_len).
+  Tensor inference(const Tensor& codes, const Tensor& lm_latent,
+                   const Tensor& prompt_feat, const Tensor& embedding,
+                   int target_len, const Tensor& z, int n_timesteps,
+                   float cfg_rate) const;
+
+ private:
+  const WeightStore& w_;
+  SemanticTokenEmbedding input_embedding_;
+  InterpolateRegulator length_regulator_;
+  ConditionalCFM decoder_;
+};
+
 }  // namespace s2a
 }  // namespace c4

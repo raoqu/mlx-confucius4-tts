@@ -18,6 +18,7 @@ add_custom_target(c4tts_fixtures DEPENDS ${FIXTURE_DIR}/mat_f32.npy)
 # Golden vectors live in the source tree (gitignored), produced by
 # tools/dump_golden.py. Tests that need them depend on the relevant dump.
 set(GOLDEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../golden)
+set(WEIGHTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../weights)
 
 function(c4tts_add_test name)
   add_executable(${name} ${name}.cpp)
@@ -25,7 +26,8 @@ function(c4tts_add_test name)
   target_link_libraries(${name} PRIVATE c4tts_core)
   target_compile_definitions(${name} PRIVATE
     C4TTS_FIXTURE_DIR="${FIXTURE_DIR}"
-    C4TTS_GOLDEN_DIR="${GOLDEN_DIR}")
+    C4TTS_GOLDEN_DIR="${GOLDEN_DIR}"
+    C4TTS_WEIGHTS_DIR="${WEIGHTS_DIR}")
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -40,3 +42,4 @@ c4tts_add_test(test_dit_block)
 c4tts_add_test(test_dit_wn)
 c4tts_add_test(test_dit_full)
 c4tts_add_test(test_cfm)
+c4tts_add_test(test_s2a_inference)

@@ -427,6 +427,52 @@ def dump_cfm(out_base):
     print(f"[cfm] solve_euler n={n_timesteps} -> {tuple(out.shape)} ; {out_dir}")
 
 
+def dump_s2a_inference(out_base):
+    """S2A E5: full MaskedDiffWithXvec.inference with the REAL checkpoint."""
+    from confuciustts.flow.flow import MaskedDiffWithXvec, MaskedDiffWithXvecConfig
+    from huggingface_hub import hf_hub_download
+
+    out_dir = os.path.join(out_base, "s2a_infer")
+    cfg = MaskedDiffWithXvecConfig(input_size=512, output_size=80,
+                                   spk_embed_dim=192, semantic_embed_dim=1024,
+                                   lm_latent_dim=1280, estimator_mlp_ratio=3.0)
+    model = MaskedDiffWithXvec(cfg)
+    sd = torch.load(hf_hub_download("netease-youdao/Confucius4-TTS",
+                                    filename="s2a_model.pt"),
+                    map_location="cpu", weights_only=False)
+    if hasattr(sd, "state_dict"):
+        sd = sd.state_dict()
+    model.load_state_dict(sd)
+    model.eval()
+
+    torch.manual_seed(7)
+    T_sem, T_ref, target = 8, 6, 12
+    codes = torch.randint(0, 8192, (1, T_sem))
+    lm_latent = torch.randn(1, T_sem, 1280)
+    prompt_feat = torch.randn(1, T_ref, 80)
+    embedding = torch.randn(1, 192)
+    n_timesteps, cfg_rate = 4, 0.7
+
+    # Capture the initial noise the decoder will draw (first randn after seed).
+    t_total = T_ref + target
+    torch.manual_seed(123)
+    z = torch.randn(1, 80, t_total)
+    torch.manual_seed(123)
+    with torch.no_grad():
+        mel = model.inference(codes, lm_latent, prompt_feat, embedding,
+                              torch.tensor([target]), n_timesteps=n_timesteps,
+                              inference_cfg_rate=cfg_rate)
+
+    _save(out_dir, "codes", codes.numpy().astype("int64"))
+    _save(out_dir, "lm_latent", lm_latent.numpy())
+    _save(out_dir, "prompt_feat", prompt_feat.numpy())
+    _save(out_dir, "embedding", embedding.numpy())
+    _save(out_dir, "z", z.numpy())
+    _save(out_dir, "target_len", np.array([target], dtype="int64"))
+    _save(out_dir, "out", mel.numpy())
+    print(f"[s2a_infer] inference -> mel {tuple(mel.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -436,6 +482,7 @@ DUMPERS = {
     "dit_wn": dump_dit_wn,
     "dit_full": dump_dit_full,
     "cfm": dump_cfm,
+    "s2a_infer": dump_s2a_inference,
 }
 
 
