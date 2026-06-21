@@ -25,11 +25,15 @@ bool WeightStore::has(const std::string& name) const {
 }
 
 Tensor WeightStore::get(const std::string& name) const {
+  auto it = cache_.find(name);
+  if (it != cache_.end()) return it->second;
   if (!has(name)) {
     throw std::runtime_error("WeightStore: missing weight '" + name + "' in " +
                              root_);
   }
-  return load_npy(path_for(name));
+  Tensor t = load_npy(path_for(name));
+  cache_.emplace(name, t);
+  return t;
 }
 
 Tensor WeightStore::get_or(const std::string& name,

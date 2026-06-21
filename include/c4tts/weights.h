@@ -12,6 +12,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 
 #include "c4tts/tensor.h"
 
@@ -35,6 +36,9 @@ class WeightStore {
  private:
   std::string path_for(const std::string& name) const;
   std::string root_;
+  // Parsed tensors are cached so repeated get() calls (every block, every AR
+  // step) don't re-read/parse the .npy from disk. MLX arrays are cheap handles.
+  mutable std::unordered_map<std::string, Tensor> cache_;
 };
 
 }  // namespace c4

@@ -65,9 +65,10 @@ Tensor Pipeline::synth(const std::string& path,
   const int n_codes = gen.codes.shape(1);
   const int target_len = static_cast<int>(n_codes * opt.length_ratio);
 
-  // Initial flow-matching noise (B=1, 80, T_ref + target).
+  // Initial flow-matching noise (B=1, 80, T_ref + target). Seeded for
+  // reproducibility.
   const int T_ref = p.ref_mel.shape(1);
-  Tensor z = mx::random::normal({1, 80, T_ref + target_len});
+  Tensor z = mx::random::normal({1, 80, T_ref + target_len}, mx::random::key(opt.seed));
 
   // S2A -> mel; BigVGAN -> waveform.
   Tensor mel = s2a_.inference(gen.codes, gen.latent, p.ref_mel, p.style,
