@@ -88,6 +88,29 @@ c4tts/
 └── tests/       per-module + integration parity tests (CTest)
 ```
 
+## Performance
+
+Apple M-series, 22.05 kHz output. Measured with `C4TTS_TIMING=1` and `--bench`:
+
+| | before | after |
+|---|---|---|
+| Cold one-shot synth | ~30 s | **~1.7 s** |
+| Warm compute (RTF) | — | **~1.2× realtime** |
+
+Optimizations (Phase H):
+- **WeightStore cache** — parsed tensors are memoized, so per-layer/per-step
+  `get()` calls don't re-read the multi-GB model from disk (the dominant cost;
+  ~7× end-to-end).
+- **T2S KV cache** — the autoregressive loop prefills once then decodes one
+  token per step (O(n) instead of O(n²) recompute).
+- **mmap weight loading** — zero-copy memory-mapped `.npy` weight packs (cold
+  start ~4.4 s → ~1.7 s).
+
+Further RTF headroom (not yet done): fp16/int8 weight quantization (faster Metal
+matmuls + smaller/faster load) and fused custom Metal kernels for the
+attention/conv hotspots. These need perceptual-quality validation beyond the
+numerical parity gates.
+
 ## Remaining work
 
 The neural engine, audio DSP, SentencePiece tokenizer, and end-to-end pipeline
@@ -96,7 +119,6 @@ quality/perf, not core function:
 - **Text normalizer** — the reference applies multilingual number/punctuation
   normalization + segmentation before tokenizing; c4tts currently tokenizes the
   text as given.
-- **Phase H performance** — KV-cache for the T2S AR loop (today recomputed per
-  step), custom Metal kernels for hotspots, weight quantization, and
-  memory-mapped weight loading (today ~3.5 GB of `.npy` is read per run).
+- **Further performance** — fp16/int8 quantization and fused Metal kernels (see
+  Performance above; the cache/KV-cache/mmap wins are already in).
 ```
