@@ -678,6 +678,36 @@ def dump_campplus(out_base):
     print(f"[campplus] fbank{tuple(fbank.shape)} -> {tuple(emb.shape)} ; {out_dir}")
 
 
+def dump_w2vbert(out_base):
+    """W2V-BERT conformer (C1): small seeded Wav2Vec2BertModel."""
+    from transformers import Wav2Vec2BertConfig, Wav2Vec2BertModel
+
+    out_dir = os.path.join(out_base, "w2vbert")
+    torch.manual_seed(46)
+    cfg = Wav2Vec2BertConfig(
+        hidden_size=64, num_hidden_layers=3, num_attention_heads=4,
+        intermediate_size=128, feature_projection_input_dim=32,
+        conv_depthwise_kernel_size=7, position_embeddings_type="relative_key",
+        left_max_position_embeddings=4, right_max_position_embeddings=2,
+        add_adapter=False, hidden_act="swish", hidden_dropout=0.0,
+        attention_dropout=0.0, feat_proj_dropout=0.0, activation_dropout=0.0,
+        conformer_conv_dropout=0.0, layerdrop=0.0)
+    m = Wav2Vec2BertModel(cfg).eval()
+
+    feats = torch.randn(1, 12, 32)
+    with torch.no_grad():
+        out = m(input_features=feats, output_hidden_states=True)
+
+    for k, v in m.state_dict().items():
+        if not (k.startswith("feature_projection.") or k.startswith("encoder.layers.")):
+            continue
+        _save(out_dir, k, v.detach().cpu().numpy())
+    _save(out_dir, "feats", feats.numpy())
+    _save(out_dir, "hs2", out.hidden_states[2].numpy())   # after layer 1
+    _save(out_dir, "last", out.last_hidden_state.numpy())  # after layer 2
+    print(f"[w2vbert] feats{tuple(feats.shape)} -> last {tuple(out.last_hidden_state.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -694,6 +724,7 @@ DUMPERS = {
     "t2s_mods": dump_t2s_mods,
     "t2s_full": dump_t2s_full,
     "campplus": dump_campplus,
+    "w2vbert": dump_w2vbert,
 }
 
 
