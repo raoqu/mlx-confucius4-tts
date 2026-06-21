@@ -66,9 +66,10 @@ Tokenizer::Tokenizer(const std::string& path) {
 
 std::vector<int> Tokenizer::encode(const std::string& text, bool add_bos,
                                    bool add_eos) const {
-  // Normalize: add_dummy_prefix + whitespace -> metaspace (identity normalizer,
-  // remove_extra_whitespaces=False).
-  std::string norm = kMeta;
+  // Normalize: whitespace -> metaspace (U+2581). Matches HuggingFace
+  // LlamaTokenizer with legacy=False, which does NOT add a dummy prefix — the
+  // first token keeps its leading metaspace only if the text starts with a space.
+  std::string norm;
   for (char c : text) norm += (c == ' ') ? kMeta : std::string(1, c);
 
   // Initial symbols: one per UTF-8 character.

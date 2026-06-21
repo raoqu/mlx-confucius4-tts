@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "c4tts/lang_tokens.h"
 #include "c4tts/pipeline.h"
 #include "c4tts/tokenizer.h"
 #include "c4tts/wav_io.h"
@@ -55,11 +56,18 @@ int synth(int argc, char** argv) {
     return 2;
   }
 
+  const std::string lang = arg(argc, argv, "--lang", "zh");
+  bool raw = false;
+  for (int i = 1; i < argc; ++i)
+    if (std::strcmp(argv[i], "--raw-text") == 0) raw = true;
+
   std::vector<int> ids;
   if (!text.empty()) {
-    // Tokenize in C++ (SentencePiece BPE), BOS+EOS per the LlamaTokenizer config.
+    // Wrap with the model's trained prompt format unless --raw-text is given,
+    // then tokenize in C++ (SentencePiece BPE) with BOS+EOS (LlamaTokenizer cfg).
+    const std::string formatted = raw ? text : c4::format_tts_text(text, lang);
     c4::Tokenizer tok(weights + "/tokenizer/vocab.tsv");
-    ids = tok.encode(text, /*add_bos=*/true, /*add_eos=*/true);
+    ids = tok.encode(formatted, /*add_bos=*/true, /*add_eos=*/true);
   } else {
     std::ifstream tf(tokens);
     int id;
