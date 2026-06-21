@@ -271,12 +271,61 @@ def dump_dit_block(out_base):
     print(f"[dit_block] Attention/DiTBlock -> {out_dir}")
 
 
+def dump_dit_wn(out_base):
+    """DiT E3c-1: WaveNet (WN, weight_norm folded) and FinalLayer."""
+    from confuciustts.flow.wavenet import WN
+    from confuciustts.flow.DiT.modules import FinalLayer
+
+    out_dir = os.path.join(out_base, "dit_wn")
+    hidden, n_layers, kernel, gin, T = 16, 3, 5, 16, 11
+
+    torch.manual_seed(8)
+    wn = WN(hidden, kernel, 1, n_layers, gin).eval()
+    x = torch.randn(2, hidden, T)
+    xmask = torch.ones(2, 1, T)
+    g = torch.randn(2, gin, 1)
+    with torch.no_grad():
+        y = wn(x, xmask, g)
+
+    # Fold weight_norm by reading the effective `.conv.weight`/`.conv.bias`.
+    def fold(mod, name):
+        _save(out_dir, name + ".weight", mod.conv.weight.detach().numpy())
+        _save(out_dir, name + ".bias", mod.conv.bias.detach().numpy())
+
+    fold(wn.cond_layer, "cond_layer")
+    for i in range(n_layers):
+        fold(wn.in_layers[i], f"in_layers.{i}")
+        fold(wn.res_skip_layers[i], f"res_skip_layers.{i}")
+    _save(out_dir, "wn_x", x.numpy())
+    _save(out_dir, "wn_mask", xmask.numpy())
+    _save(out_dir, "wn_g", g.numpy())
+    _save(out_dir, "wn_out", y.numpy())
+
+    # FinalLayer
+    torch.manual_seed(9)
+    fl = FinalLayer(hidden).eval()
+    fx = torch.randn(2, 7, hidden)
+    fcond = torch.randn(2, hidden)
+    with torch.no_grad():
+        fo = fl(fx, fcond)
+    _save(out_dir, "fl.linear.weight", fl.linear.weight.detach().numpy())
+    _save(out_dir, "fl.linear.bias", fl.linear.bias.detach().numpy())
+    _save(out_dir, "fl.mod.weight", fl.adaLN_modulation[1].weight.detach().numpy())
+    _save(out_dir, "fl.mod.bias", fl.adaLN_modulation[1].bias.detach().numpy())
+    _save(out_dir, "fl_x", fx.numpy())
+    _save(out_dir, "fl_cond", fcond.numpy())
+    _save(out_dir, "fl_out", fo.numpy())
+
+    print(f"[dit_wn] WaveNet/FinalLayer -> {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
     "s2a_lr": dump_s2a_lr,
     "dit_mods": dump_dit_mods,
     "dit_block": dump_dit_block,
+    "dit_wn": dump_dit_wn,
 }
 
 

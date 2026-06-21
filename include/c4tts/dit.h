@@ -61,5 +61,28 @@ class DiTBlock {
   int num_heads_;
 };
 
+// FinalLayer (flow/DiT/modules.py:FinalLayer): LayerNorm (no affine, eps=1e-6)
+// modulated by adaLN(SiLU->Linear)->(shift,scale), then Linear.
+//   x: (B, T, H); c: (B, H).
+//   ln has no params; lin_w/lin_b: linear (H,H)/(H,);
+//   mod_w/mod_b: adaLN_modulation.1 Linear (2H,H)/(2H,).
+Tensor final_layer(const Tensor& x, const Tensor& c, const Tensor& lin_w,
+                   const Tensor& lin_b, const Tensor& mod_w, const Tensor& mod_b);
+
+// WaveNet final stack (flow/wavenet.py:WN), weight_norm folded at export.
+//   x: (B, hidden, T); x_mask: (B, 1, T); g: (B, gin, 1) conditioning.
+// Convs are dilation=1, padding=2 for the default config (kernel 5).
+class WaveNet {
+ public:
+  WaveNet(const WeightStore& w, const std::string& prefix, int hidden,
+          int n_layers, int kernel_size, int dilation_rate);
+  Tensor forward(const Tensor& x, const Tensor& x_mask, const Tensor& g) const;
+
+ private:
+  const WeightStore& w_;
+  std::string p_;
+  int hidden_, n_layers_, kernel_, dil_rate_;
+};
+
 }  // namespace dit
 }  // namespace c4

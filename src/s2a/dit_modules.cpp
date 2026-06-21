@@ -151,5 +151,76 @@ Tensor DiTBlock::forward(const Tensor& x_in, const Tensor& cond,
   return mx::add(h, feed_forward(fnormed, w1, w2, w3));
 }
 
+Tensor final_layer(const Tensor& x, const Tensor& c, const Tensor& lin_w,
+                   const Tensor& lin_b, const Tensor& mod_w,
+                   const Tensor& mod_b) {
+  // adaLN_modulation = SiLU -> Linear; chunk(2) -> shift, scale.
+  Tensor mod = nn::linear(nn::silu(c), mod_w, &mod_b);  // (B, 2H)
+  auto parts = mx::split(mod, 2, /*axis=*/1);
+  Tensor shift = mx::expand_dims(parts[0], 1);          // (B,1,H)
+  Tensor scale = mx::expand_dims(parts[1], 1);
+  Tensor normed = nn::layer_norm(x, nullptr, nullptr, /*eps=*/1e-6f);
+  Tensor y = mx::add(mx::multiply(normed, mx::add(mx::array(1.0f), scale)), shift);
+  return nn::linear(y, lin_w, &lin_b);
+}
+
+WaveNet::WaveNet(const WeightStore& w, const std::string& prefix, int hidden,
+                 int n_layers, int kernel_size, int dilation_rate)
+    : w_(w),
+      p_(prefix),
+      hidden_(hidden),
+      n_layers_(n_layers),
+      kernel_(kernel_size),
+      dil_rate_(dilation_rate) {}
+
+Tensor WaveNet::forward(const Tensor& x_in, const Tensor& x_mask,
+                        const Tensor& g_in) const {
+  Tensor x = x_in;
+  Tensor output = mx::zeros_like(x);
+
+  // cond_layer projects g to all layers at once.
+  Tensor cw = w_.get(p_ + "cond_layer.weight");
+  Tensor cb = w_.get(p_ + "cond_layer.bias");
+  Tensor g = nn::conv1d(g_in, cw, &cb);  // (B, 2*hidden*n_layers, 1)
+
+  for (int i = 0; i < n_layers_; ++i) {
+    const int dilation =
+        static_cast<int>(std::pow(static_cast<double>(dil_rate_), i));
+    const int padding = (kernel_ * dilation - dilation) / 2;
+    const std::string ip = p_ + "in_layers." + std::to_string(i) + ".";
+    Tensor iw = w_.get(ip + "weight");
+    Tensor ib = w_.get(ip + "bias");
+    Tensor x_l = nn::conv1d(x, iw, &ib, 1, padding, dilation);  // (B, 2h, T)
+
+    const int off = i * 2 * hidden_;
+    Tensor g_l = mx::slice(g, mx::Shape{0, off, 0},
+                           mx::Shape{g.shape(0), off + 2 * hidden_, g.shape(2)});
+    // fused_add_tanh_sigmoid_multiply
+    Tensor in_act = mx::add(x_l, g_l);  // broadcasts (B,2h,1) over T
+    Tensor t_act = mx::tanh(
+        mx::slice(in_act, mx::Shape{0, 0, 0}, mx::Shape{in_act.shape(0), hidden_, in_act.shape(2)}));
+    Tensor s_act = mx::sigmoid(mx::slice(
+        in_act, mx::Shape{0, hidden_, 0}, mx::Shape{in_act.shape(0), 2 * hidden_, in_act.shape(2)}));
+    Tensor acts = mx::multiply(t_act, s_act);  // (B, h, T)
+
+    const std::string rp = p_ + "res_skip_layers." + std::to_string(i) + ".";
+    Tensor rw = w_.get(rp + "weight");
+    Tensor rb = w_.get(rp + "bias");
+    Tensor res_skip = nn::conv1d(acts, rw, &rb);
+
+    if (i < n_layers_ - 1) {
+      Tensor res = mx::slice(res_skip, mx::Shape{0, 0, 0},
+                             mx::Shape{res_skip.shape(0), hidden_, res_skip.shape(2)});
+      x = mx::multiply(mx::add(x, res), x_mask);
+      Tensor skip = mx::slice(res_skip, mx::Shape{0, hidden_, 0},
+                              mx::Shape{res_skip.shape(0), 2 * hidden_, res_skip.shape(2)});
+      output = mx::add(output, skip);
+    } else {
+      output = mx::add(output, res_skip);
+    }
+  }
+  return mx::multiply(output, x_mask);
+}
+
 }  // namespace dit
 }  // namespace c4

@@ -37,3 +37,4 @@ c4tts_add_test(test_s2a)
 c4tts_add_test(test_dit)
 
 c4tts_add_test(test_dit_block)
+c4tts_add_test(test_dit_wn)
