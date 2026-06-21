@@ -1,6 +1,9 @@
 #include "c4tts/pipeline.h"
 
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "c4tts/audio.h"
 #include "c4tts/wav_io.h"
@@ -8,6 +11,25 @@
 
 namespace c4 {
 namespace mx = mlx::core;
+
+namespace {
+// Lightweight stage timer, enabled with C4TTS_TIMING=1.
+struct Stage {
+  const char* name;
+  std::chrono::steady_clock::time_point t0;
+  bool on;
+  explicit Stage(const char* n)
+      : name(n), t0(std::chrono::steady_clock::now()),
+        on(std::getenv("C4TTS_TIMING") != nullptr) {}
+  void done(const mx::array& a) const {
+    if (!on) return;
+    mx::eval(a);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    std::fprintf(stderr, "  [timing] %-12s %6lld ms\n", name, (long long)ms);
+  }
+};
+}  // namespace
 
 Pipeline::Pipeline(const std::string& weights_root)
     : root_(weights_root),
@@ -49,7 +71,9 @@ Pipeline::Prompt Pipeline::make_prompt(const std::string& path) const {
 Tensor Pipeline::synth(const std::string& path,
                        const std::vector<int>& text_token_ids,
                        const SynthOptions& opt) const {
+  Stage tp("prompt");
   Prompt p = make_prompt(path);
+  tp.done(p.semantic);
 
   // Text token ids -> (1, T_text) int32.
   const int n = static_cast<int>(text_token_ids.size());
@@ -59,9 +83,11 @@ Tensor Pipeline::synth(const std::string& path,
                   [](void* q) { delete[] static_cast<int32_t*>(q); });
 
   // T2S: text + semantic conditioning -> semantic tokens + LM latent.
+  Stage tt("t2s");
   auto gen = t2s_.generate(text_ids, p.semantic, opt.max_new_tokens, opt.sample,
                            opt.temperature, opt.top_k, opt.top_p,
                            opt.repetition_penalty, opt.seed);
+  tt.done(gen.latent);
   const int n_codes = gen.codes.shape(1);
   const int target_len = static_cast<int>(n_codes * opt.length_ratio);
 
@@ -71,10 +97,14 @@ Tensor Pipeline::synth(const std::string& path,
   Tensor z = mx::random::normal({1, 80, T_ref + target_len}, mx::random::key(opt.seed));
 
   // S2A -> mel; BigVGAN -> waveform.
+  Stage ts("s2a");
   Tensor mel = s2a_.inference(gen.codes, gen.latent, p.ref_mel, p.style,
                               target_len, z, opt.n_timesteps,
                               opt.inference_cfg_rate);
+  ts.done(mel);
+  Stage tv("bigvgan");
   Tensor wav = bigvgan_.forward(mel);  // (1, 1, T*256)
+  tv.done(wav);
   return mx::flatten(wav);
 }
 

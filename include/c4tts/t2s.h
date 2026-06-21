@@ -18,17 +18,33 @@ namespace t2s {
 // GPT-2 transformer stack (transformers GPT2Model). Position embedding is the
 // model's DummyPositionEmbedding (zeros), so forward only consumes inputs_embeds.
 // Conv1D weights are stored (in, out) as in HuggingFace.
+// Per-layer key/value cache for incremental (autoregressive) decoding.
+struct KVCache {
+  std::vector<Tensor> k, v;  // each (B, H, T_cached, head_dim)
+  bool empty() const { return k.empty(); }
+};
+
 class GPT2 {
  public:
   GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
        int n_head);
 
   // inputs_embeds: (B, T, D) -> last_hidden_state (B, T, D) after ln_f.
-  // Full-sequence causal forward (prefill; no KV cache).
+  // Full-sequence causal forward (no KV cache).
   Tensor forward(const Tensor& inputs_embeds) const;
 
+  // Incremental causal forward with a KV cache. Processes only the new tokens
+  // in `inputs_embeds` (T_new), attending to `past_len` cached positions plus
+  // the new ones; appends the new keys/values to `cache`. Returns the ln_f'd
+  // hidden states for the new tokens (B, T_new, D).
+  Tensor forward(const Tensor& inputs_embeds, KVCache& cache, int past_len) const;
+
+  int n_layer() const { return n_layer_; }
+
  private:
-  Tensor block(const Tensor& x, const std::string& p) const;
+  // Unified block: plain when cache==nullptr, else uses/updates cache[layer].
+  Tensor block(const Tensor& x, const std::string& p, KVCache* cache, int layer,
+               int past_len) const;
 
   const WeightStore& w_;
   std::string p_;

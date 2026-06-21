@@ -30,7 +30,8 @@ GPT2::GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
            int n_head)
     : w_(w), p_(prefix), n_layer_(n_layer), n_head_(n_head) {}
 
-Tensor GPT2::block(const Tensor& x_in, const std::string& p) const {
+Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
+                   int layer, int past_len) const {
   const int B = x_in.shape(0), T = x_in.shape(1), D = x_in.shape(2);
   const int head_dim = D / n_head_;
 
@@ -48,11 +49,24 @@ Tensor GPT2::block(const Tensor& x_in, const std::string& p) const {
   Tensor k = to_heads(parts[1]);
   Tensor v = to_heads(parts[2]);
 
+  // Prepend cached keys/values, then update the cache with the full K/V.
+  if (cache) {
+    if (past_len > 0) {
+      k = mx::concatenate({cache->k[layer], k}, 2);
+      v = mx::concatenate({cache->v[layer], v}, 2);
+    }
+    cache->k[layer] = k;
+    cache->v[layer] = v;
+  }
+  const int T_tot = k.shape(2);
+
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   Tensor scores = mx::multiply(mx::matmul(q, mx::swapaxes(k, -1, -2)),
-                               mx::array(scale));  // (B,H,T,T)
-  // Causal mask: disallow attending to future positions.
-  Tensor causal = mx::tril(mx::ones({T, T}, mx::bool_));
+                               mx::array(scale));  // (B,H,T,T_tot)
+  // Causal mask: query i (absolute pos past_len+i) may attend to key j<=that.
+  Tensor rows = mx::add(mx::reshape(mx::arange(T), {T, 1}), mx::array(past_len));
+  Tensor cols = mx::reshape(mx::arange(T_tot), {1, T_tot});
+  Tensor causal = mx::less_equal(cols, rows);  // (T, T_tot)
   scores = mx::where(causal, scores, mx::array(-1e9f));
   Tensor attn = mx::softmax(scores, -1);
   Tensor ctx = mx::matmul(attn, v);  // (B,H,T,hd)
@@ -74,7 +88,21 @@ Tensor GPT2::block(const Tensor& x_in, const std::string& p) const {
 Tensor GPT2::forward(const Tensor& inputs_embeds) const {
   Tensor x = inputs_embeds;
   for (int i = 0; i < n_layer_; ++i) {
-    x = block(x, p_ + "h." + std::to_string(i) + ".");
+    x = block(x, p_ + "h." + std::to_string(i) + ".", nullptr, i, 0);
+  }
+  Tensor lfw = w_.get(p_ + "ln_f.weight"), lfb = w_.get(p_ + "ln_f.bias");
+  return nn::layer_norm(x, &lfw, &lfb);
+}
+
+Tensor GPT2::forward(const Tensor& inputs_embeds, KVCache& cache,
+                     int past_len) const {
+  if (cache.empty()) {
+    cache.k.assign(n_layer_, inputs_embeds);  // placeholder; overwritten below
+    cache.v.assign(n_layer_, inputs_embeds);
+  }
+  Tensor x = inputs_embeds;
+  for (int i = 0; i < n_layer_; ++i) {
+    x = block(x, p_ + "h." + std::to_string(i) + ".", &cache, i, past_len);
   }
   Tensor lfw = w_.get(p_ + "ln_f.weight"), lfb = w_.get(p_ + "ln_f.bias");
   return nn::layer_norm(x, &lfw, &lfb);

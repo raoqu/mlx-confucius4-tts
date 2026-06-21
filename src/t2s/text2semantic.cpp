@@ -102,12 +102,33 @@ Text2Semantic::Generation Text2Semantic::generate(
     float repetition_penalty, uint64_t seed) const {
   const int B = text_ids.shape(0);
   std::vector<int> generated;
-  Tensor sem = mx::full(mx::Shape{B, 1}, start_token_, mx::int32);  // BOS
+  std::vector<Tensor> latents;
   uint64_t rng = seed ? seed : 0x9E3779B97F4A7C15ull;
 
+  Tensor sem_w = w_.get("semantic_embedding.weight");
+  Tensor sem_pos = w_.get("semantic_position_embedding.embedding.weight");
+  const int D = sem_w.shape(1);
+  Tensor fnw = w_.get("final_norm.weight"), fnb = w_.get("final_norm.bias");
+  Tensor shw = w_.get("semantic_head.weight"), shb = w_.get("semantic_head.bias");
+
+  // cur (B,1,D) ln_f'd hidden -> semantic logits (vocab,).
+  auto head = [&](const Tensor& cur) {
+    Tensor h = nn::layer_norm(cur, &fnw, &fnb);
+    return mx::flatten(nn::linear(h, shw, &shb));
+  };
+
+  // Prefill the KV cache over [cond, text, BOS]; cur = last position.
+  Tensor bos = mx::full(mx::Shape{B, 1}, start_token_, mx::int32);
+  Tensor prefix = assemble(text_ids, bos, condition_vector);
+  KVCache cache;
+  int past = 0;
+  Tensor hidden = gpt_.forward(prefix, cache, past);
+  past = prefix.shape(1);
+  Tensor cur = mx::slice(hidden, mx::Shape{0, past - 1, 0},
+                         mx::Shape{B, past, D});  // (B,1,D)
+
   for (int step = 0; step < max_new_tokens; ++step) {
-    Tensor inputs = assemble(text_ids, sem, condition_vector);
-    Tensor logit_t = mx::flatten(last_logits(inputs));  // (vocab,)
+    Tensor logit_t = head(cur);
     mx::eval(logit_t);
     const float* ld = logit_t.data<float>();
     std::vector<float> logits(ld, ld + logit_t.size());
@@ -120,7 +141,6 @@ Text2Semantic::Generation Text2Semantic::generate(
       sampling::temperature(logits, temperature);
       sampling::top_k(logits, top_k);
       sampling::top_p(logits, top_p);
-      // softmax + inverse-CDF sample with a small xorshift RNG.
       float maxv = -1e30f;
       for (float v : logits) maxv = std::max(maxv, v);
       double sum = 0;
@@ -140,24 +160,26 @@ Text2Semantic::Generation Text2Semantic::generate(
     }
     if (tok == stop_token_) break;
     generated.push_back(tok);
-    Tensor col = mx::full(mx::Shape{B, 1}, tok, mx::int32);
-    sem = mx::concatenate({sem, col}, 1);
+    latents.push_back(cur);  // cur is the latent that predicted this token
+
+    // Embed the new token at semantic position (step+1) (BOS occupied pos 0).
+    Tensor tok_arr = mx::full(mx::Shape{B, 1}, tok, mx::int32);
+    Tensor pos_row = mx::reshape(
+        mx::slice(sem_pos, mx::Shape{step + 1, 0}, mx::Shape{step + 2, D}),
+        {1, 1, D});
+    Tensor new_emb = mx::add(nn::embedding(tok_arr, sem_w), pos_row);  // (B,1,D)
+    cur = gpt_.forward(new_emb, cache, past);  // (B,1,D)
+    past += 1;
   }
 
-  // Recompute latent over [BOS, codes...] using the raw GPT-2 output (incl ln_f).
   const int n = static_cast<int>(generated.size());
   int32_t* heap = new int32_t[n > 0 ? n : 1];
   for (int i = 0; i < n; ++i) heap[i] = generated[i];
   Tensor codes(static_cast<void*>(heap), mx::Shape{B, n}, mx::int32,
                [](void* p) { delete[] static_cast<int32_t*>(p); });
 
-  Tensor inputs = assemble(text_ids, sem, condition_vector);  // sem = [BOS, codes]
-  Tensor hidden = gpt_.forward(inputs);
-  const int text_len = text_ids.shape(1);
-  // latent = hidden[:, 1+text_len : 1+text_len+n]  (the generated-token positions)
-  Tensor latent = mx::slice(
-      hidden, mx::Shape{0, 1 + text_len, 0},
-      mx::Shape{B, 1 + text_len + n, hidden.shape(2)});
+  Tensor latent = n > 0 ? mx::concatenate(latents, 1)
+                        : mx::zeros({B, 0, D}, mx::float32);
   return Generation{codes, latent};
 }
 
