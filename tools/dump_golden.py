@@ -591,6 +591,41 @@ def dump_t2s_mods(out_base):
     print(f"[t2s_mods] SpeakerEncoder/TextProjector/PosEmb -> {out_dir}")
 
 
+def dump_t2s_full(out_base):
+    """T2S D-3: full Text2Semantic.forward logits (small seeded model)."""
+    from confuciustts.llm.llm import Text2Semantic, Text2SemanticConfig
+
+    out_dir = os.path.join(out_base, "t2s_full")
+    torch.manual_seed(44)
+    cfg = Text2SemanticConfig(
+        num_layers=2, model_dim=64, num_heads=4, vocab_size=50,
+        semantic_vocab_size=40, text_embedding_dim=32, speaker_embedding_dim=48,
+        start_semantic_token=38, stop_semantic_token=39)
+    model = Text2Semantic(cfg).eval()
+
+    B, T_text, T_sem, T_cond = 1, 5, 7, 9
+    text_ids = torch.randint(0, 50, (B, T_text))
+    semantic_codes = torch.randint(0, 38, (B, T_sem))
+    condition_vector = torch.randn(B, T_cond, 48)
+    attn = torch.ones(B, 1 + T_text + T_sem, dtype=torch.bool)
+    with torch.no_grad():
+        out = model(text_inputs=text_ids, semantic_codes=semantic_codes,
+                    condition_vector=condition_vector, attention_mask=attn)
+    logits = out.logits  # (B, T_sem, vocab)
+
+    for k, v in model.state_dict().items():
+        if k.endswith(".attn.bias") or k.endswith(".attn.masked_bias"):
+            continue
+        if k.startswith("transformer.wpe") or k.startswith("transformer.wte"):
+            continue
+        _save(out_dir, k, v.detach().cpu().numpy())
+    _save(out_dir, "text_ids", text_ids.numpy().astype("int64"))
+    _save(out_dir, "semantic_codes", semantic_codes.numpy().astype("int64"))
+    _save(out_dir, "condition_vector", condition_vector.numpy())
+    _save(out_dir, "logits", logits.numpy())
+    print(f"[t2s_full] logits {tuple(logits.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -605,6 +640,7 @@ DUMPERS = {
     "bigvgan": dump_bigvgan,
     "gpt2": dump_gpt2,
     "t2s_mods": dump_t2s_mods,
+    "t2s_full": dump_t2s_full,
 }
 
 

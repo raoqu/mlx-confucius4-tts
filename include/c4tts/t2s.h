@@ -73,5 +73,38 @@ class TextEmbeddingProjector {
 //   x: (B, T, D); adds embedding rows [0, T).
 Tensor add_learned_positions(const Tensor& x, const Tensor& pos_table);
 
+// Text2Semantic (llm/llm.py): the full T2S model — assembles
+// [condition, text, semantic] embeddings, runs GPT-2, and projects to semantic
+// logits. Drives autoregressive semantic-token generation.
+class Text2Semantic {
+ public:
+  Text2Semantic(const WeightStore& w, int num_layers, int num_heads,
+                int start_token = 8192, int stop_token = 8193);
+
+  // Training-style forward: logits over the semantic positions.
+  //   text_ids: (B, T_text) int; semantic_codes: (B, T_sem) int (incl BOS/EOS);
+  //   condition_vector: (B, T_cond, spk_dim) -> (B, T_sem, semantic_vocab).
+  Tensor forward_logits(const Tensor& text_ids, const Tensor& semantic_codes,
+                        const Tensor& condition_vector) const;
+
+  // Greedy autoregressive generation (no KV cache; recomputes per step).
+  // Returns the generated semantic token ids (B, T_gen), excluding BOS/EOS.
+  Tensor generate_greedy(const Tensor& text_ids, const Tensor& condition_vector,
+                         int max_new_tokens) const;
+
+ private:
+  // Builds [cond, text, sem] inputs_embeds for the given semantic prefix.
+  Tensor assemble(const Tensor& text_ids, const Tensor& semantic_codes,
+                  const Tensor& condition_vector) const;
+  // Logits for the last position only (used by the AR loop).
+  Tensor last_logits(const Tensor& inputs_embeds) const;
+
+  const WeightStore& w_;
+  GPT2 gpt_;
+  SpeakerEncoder spk_;
+  TextEmbeddingProjector text_proj_;
+  int start_token_, stop_token_;
+};
+
 }  // namespace t2s
 }  // namespace c4
