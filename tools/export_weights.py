@@ -95,9 +95,39 @@ def export_bigvgan(out_base):
     print(f"[bigvgan] exported {n} tensors (+filters) -> {out_dir}")
 
 
+def export_w2vbert(out_base):
+    from transformers import Wav2Vec2BertModel
+    m = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
+    sd = m.state_dict()
+    out_dir = os.path.join(out_base, "w2vbert")
+    # Only the feature projection + conformer layers are needed.
+    sd = {k: v for k, v in sd.items()
+          if k.startswith("feature_projection.") or k.startswith("encoder.layers.")}
+    n = export_state_dict(sd, out_dir)
+    # Also export the layer-17 normalization stats (wav2vec2bert_stats.pt).
+    stats = torch.load(os.path.join(REPO_ROOT, "checkpoints", "wav2vec2bert_stats.pt"),
+                       map_location="cpu")
+    _save(out_dir, "semantic_mean", stats["mean"].numpy())
+    _save(out_dir, "semantic_std", torch.sqrt(stats["var"]).numpy())
+    print(f"[w2vbert] exported {n} tensors (+stats) -> {out_dir}")
+
+
+def export_campplus(out_base):
+    from huggingface_hub import hf_hub_download
+    f = hf_hub_download("funasr/campplus", filename="campplus_cn_common.bin")
+    sd = torch.load(f, map_location="cpu")
+    if isinstance(sd, dict) and "state_dict" in sd:
+        sd = sd["state_dict"]
+    out_dir = os.path.join(out_base, "campplus")
+    n = export_state_dict(sd, out_dir)
+    print(f"[campplus] exported {n} tensors -> {out_dir}")
+
+
 EXPORTERS = {
     "s2a": export_s2a,
     "bigvgan": export_bigvgan,
+    "w2vbert": export_w2vbert,
+    "campplus": export_campplus,
 }
 
 

@@ -751,6 +751,47 @@ def dump_resample(out_base):
     print(f"[resample] 24k{tuple(wav.shape)} -> 16k{tuple(r16.shape)} 22k{tuple(r22.shape)} ; {out_dir}")
 
 
+def dump_prompt(out_base):
+    """Real-weight prompt encoders (C integration): semantic + style from wav."""
+    import torchaudio
+    from transformers import SeamlessM4TFeatureExtractor, Wav2Vec2BertModel
+    from huggingface_hub import hf_hub_download
+    from external.campplus import CAMPPlus
+
+    out_dir = os.path.join(out_base, "prompt")
+    fe = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+    w2v = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0").eval()
+    stats = torch.load(os.path.join(REPO_ROOT, "checkpoints", "wav2vec2bert_stats.pt"),
+                       map_location="cpu")
+    mean, std = stats["mean"], torch.sqrt(stats["var"])
+    camp = CAMPPlus(feat_dim=80, embedding_size=192)
+    camp.load_state_dict(torch.load(
+        hf_hub_download("funasr/campplus", filename="campplus_cn_common.bin"),
+        map_location="cpu"), strict=False)
+    camp.eval()
+
+    torch.manual_seed(50)
+    wav16 = torch.randn(1, 8000) * 0.1
+
+    inputs = fe(wav16.squeeze(0).numpy(), sampling_rate=16000, return_tensors="pt")
+    with torch.no_grad():
+        feats = w2v(input_features=inputs["input_features"],
+                    attention_mask=inputs.get("attention_mask"),
+                    output_hidden_states=True).hidden_states[17]
+    sem = (feats - mean) / std
+
+    fbank = torchaudio.compliance.kaldi.fbank(
+        wav16, num_mel_bins=80, sample_frequency=16000, dither=0.0)
+    fbank = fbank - fbank.mean(0, keepdim=True)
+    with torch.no_grad():
+        style = camp(fbank.unsqueeze(0))
+
+    _save(out_dir, "wav16", wav16.squeeze(0).numpy())
+    _save(out_dir, "semantic", sem.numpy())
+    _save(out_dir, "style", style.numpy())
+    print(f"[prompt] semantic{tuple(sem.shape)} style{tuple(style.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -771,6 +812,7 @@ DUMPERS = {
     "fbank": dump_fbank,
     "seamless": dump_seamless,
     "resample": dump_resample,
+    "prompt": dump_prompt,
 }
 
 
