@@ -31,7 +31,7 @@ Tensor WeightStore::get(const std::string& name) const {
     throw std::runtime_error("WeightStore: missing weight '" + name + "' in " +
                              root_);
   }
-  Tensor t = load_npy(path_for(name));
+  Tensor t = load_npy_mmap(path_for(name));  // zero-copy for f4/i4 weight packs
   cache_.emplace(name, t);
   return t;
 }

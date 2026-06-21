@@ -10,6 +10,11 @@
 
 #pragma once
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
@@ -129,6 +134,66 @@ inline mx::array load_npy(const std::string& path) {
                      [](void* p) { delete[] static_cast<int32_t*>(p); });
   }
   throw std::runtime_error("npy: unsupported dtype '" + descr + "' in " + path);
+}
+
+// Zero-copy load via mmap for the common dtypes (<f4, <i4): the returned MLX
+// array references the memory-mapped file directly (munmap'd when freed), which
+// avoids reading+copying multi-GB weight packs. Falls back to load_npy (copy)
+// for dtypes needing conversion (<f8, <i8).
+inline mx::array load_npy_mmap(const std::string& path) {
+  // Parse the header with a cheap stream read to find dtype/shape/data offset.
+  std::ifstream f(path, std::ios::binary);
+  if (!f) throw std::runtime_error("npy: cannot open " + path);
+  char magic[6];
+  f.read(magic, 6);
+  if (std::string(magic, 6) != "\x93NUMPY")
+    throw std::runtime_error("npy: bad magic in " + path);
+  uint8_t major = 0, minor = 0;
+  f.read(reinterpret_cast<char*>(&major), 1);
+  f.read(reinterpret_cast<char*>(&minor), 1);
+  uint32_t header_len = 0;
+  size_t preamble = 8;
+  if (major == 1) {
+    uint16_t l16 = 0; f.read(reinterpret_cast<char*>(&l16), 2); header_len = l16; preamble += 2;
+  } else {
+    f.read(reinterpret_cast<char*>(&header_len), 4); preamble += 4;
+  }
+  std::string header(header_len, '\0');
+  f.read(header.data(), header_len);
+  f.close();
+  const size_t data_offset = preamble + header_len;
+
+  const std::string descr = detail::parse_header_field(header, "descr");
+  if (detail::parse_header_field(header, "fortran_order").find("True") != std::string::npos)
+    throw std::runtime_error("npy: fortran_order not supported (" + path + ")");
+  const bool is_f4 = descr.find("f4") != std::string::npos;
+  const bool is_i4 = descr.find("i4") != std::string::npos;
+  if (!is_f4 && !is_i4) return load_npy(path);  // conversion needed -> copy path
+
+  auto sp = header.find("'shape':");
+  auto open = header.find('(', sp);
+  auto close = header.find(')', open);
+  std::string shape_str = header.substr(open, close - open + 1);
+  std::vector<int> shape;
+  std::string num;
+  for (char c : shape_str) {
+    if (c >= '0' && c <= '9') num += c;
+    else if (!num.empty()) { shape.push_back(std::stoi(num)); num.clear(); }
+  }
+  const mx::Shape mshape(shape.begin(), shape.end());
+
+  int fd = ::open(path.c_str(), O_RDONLY);
+  if (fd < 0) throw std::runtime_error("npy: cannot open(2) " + path);
+  struct stat st {};
+  if (fstat(fd, &st) != 0) { ::close(fd); throw std::runtime_error("npy: fstat " + path); }
+  const size_t fsize = static_cast<size_t>(st.st_size);
+  void* base = ::mmap(nullptr, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
+  ::close(fd);
+  if (base == MAP_FAILED) return load_npy(path);  // mmap failed -> copy path
+
+  void* data = static_cast<char*>(base) + data_offset;
+  auto deleter = [base, fsize](void*) { ::munmap(base, fsize); };
+  return mx::array(data, mshape, is_f4 ? mx::float32 : mx::int32, deleter);
 }
 
 // Saves an MLX array to a .npy file as float32 (int32 arrays are kept as <i4).
