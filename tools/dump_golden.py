@@ -371,6 +371,62 @@ def dump_dit_full(out_base):
     print(f"[dit_full] DiT.forward x{tuple(x.shape)} -> {tuple(y.shape)} ; {out_dir}")
 
 
+def dump_cfm(out_base):
+    """S2A E4: ConditionalCFM.solve_euler (Euler ODE + CFG)."""
+    from confuciustts.flow.flow_matching import ConditionalCFM
+
+    out_dir = os.path.join(out_base, "cfm")
+    hidden, heads, depth, mel, cond_dim, style = 32, 4, 5, 8, 16, 6
+
+    torch.manual_seed(12)
+    cfm = ConditionalCFM(
+        sigma_min=1e-6, training_cfg_rate=0.2, inference_cfg_rate=0.7,
+        t_scheduler="linear", hidden_dim=hidden, num_heads=heads, depth=depth,
+        mel_dim=mel, cond_dim=cond_dim, style_dim=style,
+        long_skip_connection=True, ff_intermediate_size=hidden * 3,
+        final_layer="wavenet", wavenet_hidden_dim=hidden, wavenet_kernel_size=5,
+        wavenet_dilation_rate=1, wavenet_num_layers=3).eval()
+
+    b, T, Tref = 1, 10, 4
+    mu = torch.randn(b, T, cond_dim)
+    prompt = torch.randn(b, mel, Tref)
+    spks = torch.randn(b, style)
+    x_lens = torch.tensor([T])
+    n_timesteps = 6
+    cfg_rate = 0.7
+    torch.manual_seed(99)
+    z = torch.randn(b, mel, T)
+    t_span = torch.linspace(0, 1, n_timesteps + 1)  # linear schedule
+
+    with torch.no_grad():
+        out = cfm.solve_euler(z.clone(), t_span=t_span, x_lens=x_lens,
+                              prompt=prompt, mu=mu, spks=spks, cfg_rate=cfg_rate)
+
+    for k, v in cfm.state_dict().items():
+        if "freqs_cis" in k or ".wavenet." in k:
+            continue
+        _save(out_dir, k, v.detach().cpu().numpy())
+
+    def fold(mod, name):
+        _save(out_dir, name + ".weight", mod.conv.weight.detach().numpy())
+        _save(out_dir, name + ".bias", mod.conv.bias.detach().numpy())
+
+    wn = cfm.estimator.wavenet
+    fold(wn.cond_layer, "estimator.wavenet.cond_layer")
+    for i in range(3):
+        fold(wn.in_layers[i], f"estimator.wavenet.in_layers.{i}")
+        fold(wn.res_skip_layers[i], f"estimator.wavenet.res_skip_layers.{i}")
+
+    _save(out_dir, "z", z.numpy())
+    _save(out_dir, "mu", mu.numpy())
+    _save(out_dir, "prompt", prompt.numpy())
+    _save(out_dir, "spks", spks.numpy())
+    _save(out_dir, "mask", torch.ones(b, T).numpy())
+    _save(out_dir, "t_span", t_span.numpy())
+    _save(out_dir, "out", out.numpy())
+    print(f"[cfm] solve_euler n={n_timesteps} -> {tuple(out.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -379,6 +435,7 @@ DUMPERS = {
     "dit_block": dump_dit_block,
     "dit_wn": dump_dit_wn,
     "dit_full": dump_dit_full,
+    "cfm": dump_cfm,
 }
 
 

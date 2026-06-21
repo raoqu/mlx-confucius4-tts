@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "c4tts/dit.h"
 #include "c4tts/tensor.h"
 #include "c4tts/weights.h"
 
@@ -45,6 +46,33 @@ class InterpolateRegulator {
   std::string p_;
   int num_blocks_;
   int groups_;
+};
+
+// flow/flow_matching.py:ConditionalCFM — Euler ODE solver with classifier-free
+// guidance over the DiT velocity estimator. The estimator's params live under
+// "<prefix>estimator.".
+class ConditionalCFM {
+ public:
+  ConditionalCFM(const WeightStore& w, const std::string& prefix, int hidden,
+                 int num_heads, int depth, int mel_dim, int wavenet_hidden,
+                 int wavenet_layers, int wavenet_kernel,
+                 int wavenet_dilation_rate, int spk_dim);
+
+  // Integrate from initial noise z to the target mel.
+  //   z:      (B, mel_dim, T) initial noise
+  //   t_span: (n_steps+1,) integration grid (already scheduler-transformed)
+  //   mask:   (B, T) float padding mask
+  //   prompt: (B, mel_dim, T_ref) reference mel (zeroed region is regenerated)
+  //   mu:     (B, T, cond_dim) conditioning
+  //   spks:   (B, spk_dim)
+  // returns (B, mel_dim, T).
+  Tensor solve_euler(Tensor z, const Tensor& t_span, const Tensor& mask,
+                     const Tensor& prompt, const Tensor& mu, const Tensor& spks,
+                     float cfg_rate) const;
+
+ private:
+  dit::DiT estimator_;
+  int mel_dim_;
 };
 
 }  // namespace s2a
