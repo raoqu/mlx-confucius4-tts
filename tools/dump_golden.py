@@ -653,6 +653,31 @@ def dump_t2s_full(out_base):
     print(f"[t2s_full] logits {tuple(logits.shape)} ; {out_dir}")
 
 
+def dump_campplus(out_base):
+    """CAMPPlus speaker encoder (C2): fbank -> style embedding (seeded model)."""
+    from external.campplus import CAMPPlus
+
+    out_dir = os.path.join(out_base, "campplus")
+    torch.manual_seed(45)
+    model = CAMPPlus(feat_dim=80, embedding_size=512).eval()
+    # Randomize BN running stats so eval-mode normalization is exercised.
+    for m in model.modules():
+        if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)):
+            m.running_mean.normal_(0, 0.5)
+            m.running_var.uniform_(0.5, 1.5)
+
+    fbank = torch.randn(1, 150, 80)  # T=150 exercises seg_pooling partial window
+    with torch.no_grad():
+        emb = model(fbank)  # (1, 512)
+    for k, v in model.state_dict().items():
+        if k.endswith("num_batches_tracked"):
+            continue
+        _save(out_dir, k, v.detach().cpu().numpy())
+    _save(out_dir, "fbank", fbank.numpy())
+    _save(out_dir, "emb", emb.numpy())
+    print(f"[campplus] fbank{tuple(fbank.shape)} -> {tuple(emb.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
@@ -668,6 +693,7 @@ DUMPERS = {
     "gpt2": dump_gpt2,
     "t2s_mods": dump_t2s_mods,
     "t2s_full": dump_t2s_full,
+    "campplus": dump_campplus,
 }
 
 
