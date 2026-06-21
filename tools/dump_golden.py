@@ -127,9 +127,54 @@ def dump_nn(out_base):
     print(f"[nn] linear/conv1d/layer_norm/group_norm/rms_norm/acts -> {out_dir}")
 
 
+def _save_state_dict(out_dir, module):
+    for k, v in module.state_dict().items():
+        _save(out_dir, k, v.detach().cpu().numpy())
+
+
+def dump_s2a_lr(out_base):
+    """S2A E1+E2: SemanticTokenEmbedding and InterpolateRegulator.
+
+    Uses seeded, randomly-initialized instances of the real classes so module
+    math is verified independently of the trained checkpoint.
+    """
+    from confuciustts.flow.modules import SemanticTokenEmbedding
+    from confuciustts.flow.length_regulator import InterpolateRegulator
+
+    # --- E1: SemanticTokenEmbedding ---
+    out_dir = os.path.join(out_base, "s2a_emb")
+    torch.manual_seed(1)
+    emb = SemanticTokenEmbedding(codebook_size=8192, codebook_dim=8, output_dim=1024)
+    emb.eval()
+    codes = torch.randint(0, 8192, (1, 20))
+    with torch.no_grad():
+        y = emb(codes)  # (1, 1024, 20)
+    _save_state_dict(out_dir, emb)
+    _save(out_dir, "codes", codes.numpy().astype("int64"))
+    _save(out_dir, "out", y.numpy())
+    print(f"[s2a_emb] codes{tuple(codes.shape)} -> {tuple(y.shape)} ; {out_dir}")
+
+    # --- E2: InterpolateRegulator ---
+    out_dir = os.path.join(out_base, "s2a_lr")
+    torch.manual_seed(2)
+    lr = InterpolateRegulator(channels=512, sampling_ratios=(1, 1, 1, 1),
+                              out_channels=512, groups=1, in_channels=1024)
+    lr.eval()
+    x = torch.randn(1, 20, 1024)
+    target_len = 34
+    with torch.no_grad():
+        out, _ = lr(x, torch.tensor([target_len]))  # (1, 34, 512)
+    _save_state_dict(out_dir, lr)
+    _save(out_dir, "x", x.numpy())
+    _save(out_dir, "target_len", np.array([target_len], dtype="int64"))
+    _save(out_dir, "out", out.numpy())
+    print(f"[s2a_lr] x{tuple(x.shape)} -> {tuple(out.shape)} ; {out_dir}")
+
+
 DUMPERS = {
     "mel": dump_mel,
     "nn": dump_nn,
+    "s2a_lr": dump_s2a_lr,
 }
 
 

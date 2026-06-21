@@ -34,6 +34,13 @@ Tensor group_norm(const Tensor& x, int num_groups, const Tensor* weight = nullpt
 // computed in float32 like flow/DiT/modules.py:RMSNorm.
 Tensor rms_norm(const Tensor& x, const Tensor& weight, float eps = 1e-6f);
 
+// Embedding lookup: weight (V, D), ids (...,) int -> (..., D).
+Tensor embedding(const Tensor& ids, const Tensor& weight);
+
+// Nearest-neighbour resize along the last axis to `out_len`, matching
+// torch.nn.functional.interpolate(mode="nearest") (index = floor(i*L/out_len)).
+Tensor interpolate_nearest(const Tensor& x, int out_len);
+
 Tensor silu(const Tensor& x);
 Tensor gelu(const Tensor& x);   // exact (erf) gelu, matches nn.GELU() default
 Tensor mish(const Tensor& x);   // x * tanh(softplus(x)), matches nn.Mish()

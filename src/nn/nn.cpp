@@ -1,5 +1,7 @@
 #include "c4tts/nn.h"
 
+#include <vector>
+
 #include "mlx/mlx.h"
 
 namespace c4 {
@@ -60,6 +62,23 @@ Tensor rms_norm(const Tensor& x, const Tensor& weight, float eps) {
   Tensor y = mx::multiply(xf, mx::rsqrt(mx::add(ms, mx::array(eps))));
   y = mx::astype(y, x.dtype());
   return mx::multiply(y, weight);
+}
+
+Tensor embedding(const Tensor& ids, const Tensor& weight) {
+  return mx::take(weight, ids, 0);
+}
+
+Tensor interpolate_nearest(const Tensor& x, int out_len) {
+  const int in_len = x.shape(x.ndim() - 1);
+  std::vector<int32_t> idx(static_cast<size_t>(out_len));
+  for (int i = 0; i < out_len; ++i) {
+    idx[i] = static_cast<int32_t>((static_cast<int64_t>(i) * in_len) / out_len);
+  }
+  int32_t* heap = new int32_t[idx.size()];
+  for (size_t i = 0; i < idx.size(); ++i) heap[i] = idx[i];
+  mx::array index(static_cast<void*>(heap), mx::Shape{out_len}, mx::int32,
+                  [](void* p) { delete[] static_cast<int32_t*>(p); });
+  return mx::take(x, index, x.ndim() - 1);
 }
 
 Tensor silu(const Tensor& x) { return mx::multiply(x, mx::sigmoid(x)); }
