@@ -110,13 +110,64 @@ ctest --test-dir build --output-on-failure      # run the parity suite
    `--tokens ids.txt` (one id per line) is still accepted as an alternative to
    `--text` for externally tokenized input.
 
+## Web server & API
+
+c4tts ships an embedded HTTP server with a single-page web console and an
+OpenAI-style speech API (the same frontend page and routes as the
+index-tts2-metal runtime). The model is loaded once at startup and reused for
+every request.
+
+```bash
+# Web console + API at http://127.0.0.1:3456/web (admin key required)
+./build/c4tts_cli --web --web-key secret
+
+# API only, no web console
+./build/c4tts_cli --server --host 0.0.0.0 --port 3456
+```
+
+Flags: `--web` (serve the console), `--server` (API only), `--web-key KEY`
+(admin key for the console and its `/web/api/*` routes; env `C4TTS_WEBKEY`),
+`--host` (default `127.0.0.1`), `--port` (default `3456`), `--weights DIR`
+(default `bin/`), `--voice-store DIR` (default `voices/`), `--lang` (default
+`zh`), `--queue-size N`.
+
+Performance: set `C4TTS_FP16=1` (env, honored by both `synth` and the server)
+to run the T2S GPT-2 projection matmuls in float16. The fp32 residual stream,
+norms, attention, and sampling are preserved, so the selected tokens are
+unchanged (greedy decode is bit-stable) while decode bandwidth drops. Set
+`C4TTS_TIMING=1` to print per-stage timings (prompt / t2s / s2a / bigvgan).
+
+Voices are managed in SQLite (`<store>/voices.sqlite`) with reference audio
+under `<store>/samples` and c4tts voice bundles (`.pt`) under `<store>/bundles`.
+A c4tts bundle embeds the source reference WAV; the conditioning is derived from
+it at synth time (the on-disk format differs from index-tts2 bundles).
+
+Key endpoints (also reachable under `/web/api/*` with the web key):
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| POST   | `/v1/audio/speech` | synthesize: `{input, voice, response_format:"wav", lang?, steps?, max_tokens?}` → WAV |
+| GET/POST | `/v1/audio/voices` | list / create (multipart `audio_sample`, or JSON `bundle_path`) |
+| GET/PATCH/DELETE | `/v1/audio/voices/{id}` | fetch / edit / delete a voice |
+| GET    | `/api/voices/{id}/source-audio` | the voice's reference WAV |
+| GET    | `/status` · `/health` | queue + job metrics · liveness |
+
+```bash
+# Create a voice from reference audio, then synthesize
+curl -s -H 'X-MTTS-Web-Key: secret' -F name=qin -F audio_sample=@ref.wav \
+  http://127.0.0.1:3456/web/api/voices
+curl -s -H 'X-MTTS-Web-Key: secret' -H 'Content-Type: application/json' \
+  -d '{"input":"你好世界","voice":"qin","response_format":"wav"}' \
+  http://127.0.0.1:3456/web/api/speech -o out.wav
+```
+
 ## Layout
 
 ```
 c4tts/
-├── apps/        CLI (smoke test + `synth`)
-├── include/     public headers (tensor, nn, weights, audio, t2s, s2a, vocoder, campplus, w2vbert, pipeline)
-├── src/         engine implementation
+├── apps/        CLI (smoke test + `synth` + `--web`/`--server`)
+├── include/     public headers (tensor, nn, weights, audio, t2s, s2a, vocoder, campplus, w2vbert, pipeline, server)
+├── src/         engine implementation (src/server/ = HTTP server + embedded web UI)
 ├── tools/       Python: export_weights.py (weights -> WeightStore), dump_golden.py (parity vectors)
 └── tests/       per-module + integration parity tests (CTest)
 ```
