@@ -17,11 +17,15 @@ import sys
 import numpy as np
 import torch
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# The PyTorch reference (confuciustts/, external/) lives in the upstream repo,
+# which may be this repo's parent or a sibling; make it importable.
+_REF = os.environ.get("CONFUCIUS_SRC", os.path.dirname(REPO_ROOT))
+for _p in (REPO_ROOT, _REF):
+    if _p and _p not in sys.path:
+        sys.path.insert(0, _p)
 
-DEFAULT_OUT = os.path.join(REPO_ROOT, "c4tts", "golden")
+DEFAULT_OUT = os.path.join(REPO_ROOT, "golden")
 
 # Audio params (config/inference_config.yaml -> audio:)
 SR = 22050

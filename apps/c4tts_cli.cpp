@@ -48,14 +48,14 @@ std::string arg(int argc, char** argv, const std::string& key,
 }
 
 // Default model directory: <repo>/bin, resolved relative to the executable
-// (<repo>/c4tts/build/c4tts_cli) so it works regardless of the current dir.
+// (<repo>/build/c4tts_cli) so it works regardless of the current dir.
 std::string default_weights_dir() {
   char buf[PATH_MAX];
   uint32_t sz = sizeof(buf);
   if (_NSGetExecutablePath(buf, &sz) == 0) {
     std::string p(buf);
     auto slash = p.find_last_of('/');
-    if (slash != std::string::npos) return p.substr(0, slash) + "/../../bin";
+    if (slash != std::string::npos) return p.substr(0, slash) + "/../bin";
   }
   return "bin";
 }

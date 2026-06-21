@@ -19,9 +19,15 @@ import sys
 import numpy as np
 import torch
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Outputs live under the c4tts repo root; the PyTorch reference packages
+# (confuciustts/, external/, checkpoints/) live in the upstream Confucius4-TTS
+# repo, which may be this repo's parent (nested) or a sibling. Make both
+# importable so weight export works in either layout.
+_REF = os.environ.get("CONFUCIUS_SRC", os.path.dirname(REPO_ROOT))
+for _p in (REPO_ROOT, _REF):
+    if _p and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 DEFAULT_OUT = os.path.join(REPO_ROOT, "bin")
 # Recomputable buffers we never need to ship: DiT RoPE table, and the fixed
@@ -106,9 +112,15 @@ def export_w2vbert(out_base):
     sd = {k: v for k, v in sd.items()
           if k.startswith("feature_projection.") or k.startswith("encoder.layers.")}
     n = export_state_dict(sd, out_dir)
-    # Also export the layer-17 normalization stats (wav2vec2bert_stats.pt).
-    stats = torch.load(os.path.join(REPO_ROOT, "checkpoints", "wav2vec2bert_stats.pt"),
-                       map_location="cpu")
+    # Also export the layer-17 normalization stats (wav2vec2bert_stats.pt),
+    # found under checkpoints/ of this repo or the upstream reference repo.
+    stats_path = next(
+        (p for p in (os.path.join(REPO_ROOT, "checkpoints", "wav2vec2bert_stats.pt"),
+                     os.path.join(_REF, "checkpoints", "wav2vec2bert_stats.pt"))
+         if os.path.exists(p)), None)
+    if stats_path is None:
+        raise FileNotFoundError("wav2vec2bert_stats.pt not found (checkpoints/)")
+    stats = torch.load(stats_path, map_location="cpu")
     _save(out_dir, "semantic_mean", stats["mean"].numpy())
     _save(out_dir, "semantic_std", torch.sqrt(stats["var"]).numpy())
     print(f"[w2vbert] exported {n} tensors (+stats) -> {out_dir}")

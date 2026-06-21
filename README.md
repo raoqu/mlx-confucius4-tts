@@ -1,13 +1,13 @@
 # c4tts
 
 A standalone, Apple-Silicon-optimized **C++** inference engine for
-[Confucius4-TTS](../README.md) — zero-shot voice-cloning TTS with no Python
+[Confucius4-TTS](https://huggingface.co/netease-youdao/Confucius4-TTS) — zero-shot voice-cloning TTS with no Python
 runtime dependency at inference time. Built on [MLX](https://github.com/ml-explore/mlx)
 (Metal under the hood); the philosophy follows
 [antirez/ds4](https://github.com/antirez/ds4): narrow focus, golden-vector
 parity against the PyTorch reference, fully self-contained.
 
-Roadmap and design: [`../docs/PLAN.md`](../docs/PLAN.md).
+Roadmap and design: [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Pipeline
 
@@ -55,7 +55,7 @@ activations) are individually parity-tested.
 Convenience scripts at the repository root wrap the whole flow:
 
 ```bash
-./build.sh      # compile (Release) -> c4tts/build/c4tts_cli
+./build.sh      # compile (Release) -> build/c4tts_cli
 ./prepare.sh    # export ALL runtime model files into bin/
 ./start.sh      # text -> speech end to end (auto-builds + prepares on first run)
 ./clean.sh      # remove build/  (./clean.sh --all also drops bin/ + golden/)
@@ -73,7 +73,7 @@ Command-line example:
 ./start.sh output.wav "你好，欢迎使用 c4tts 语音合成引擎。" demo_out.wav -- --steps 25
 
 # or the binary directly (English -> --lang en):
-./c4tts/build/c4tts_cli synth --prompt output.wav \
+./build/c4tts_cli synth --prompt output.wav \
     --lang en --text "Hello, this is a voice cloning demo." --out demo_out.wav
 ```
 
@@ -89,7 +89,6 @@ Requirements: macOS / Apple Silicon, CMake ≥ 3.24, recent Apple Clang, and the
 `mlx` Python wheel installed (its bundled C++ lib + CMake config are reused).
 
 ```bash
-cd c4tts
 cmake -S . -B build -DC4TTS_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build --output-on-failure      # run the parity suite

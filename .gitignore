@@ -4,8 +4,18 @@ build/
 *.a
 *.dylib
 
-# Generated weight packs and golden vectors (large; produced by tools/)
+# Runtime model files (exported by prepare.sh; multi-GB) and downloads
+bin/
+downloads/
+
+# Generated golden vectors / weight packs (produced by tools/)
+golden/
 *.c4w
 *.npz
-weights/
-golden/
+
+# Generated audio
+*.wav
+
+# Python caches
+__pycache__/
+*.pyc
