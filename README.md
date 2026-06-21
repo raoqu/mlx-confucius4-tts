@@ -166,6 +166,12 @@ Performance (env vars, honored by both `synth` and the server):
   64 measured best for both widths here).
 - `C4TTS_FP16=1` — run the same projection matmuls in float16 (smaller win,
   ~1.1×; superseded by `C4TTS_QUANT=8`). Ignored when `C4TTS_QUANT` is set.
+- `C4TTS_SOLVER=ab2` — use a 2nd-order Adams-Bashforth integrator for the S2A
+  flow-matching ODE instead of the default 1st-order Euler (same one velocity
+  eval per step, reuses the previous step). It's strictly more accurate than
+  Euler at equal steps, so you can cut `--steps` and keep quality: `--steps 16`
+  ≈ Euler-25 at ~1.5× the S2A stage, `--steps 12` ~2× with a small quality
+  tradeoff (validated by log-mel distance). Default stays Euler-25.
 - `C4TTS_TIMING=1` — print per-stage timings (prompt / t2s / s2a / bigvgan).
 
 The fp32 residual stream, norms, attention, and sampling are always preserved;
