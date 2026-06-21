@@ -123,14 +123,22 @@ def export_campplus(out_base):
     print(f"[campplus] exported {n} tensors -> {out_dir}")
 
 
-def export_t2s(out_base):
+def export_t2s(out_base, path=None):
     import safetensors.torch
-    from huggingface_hub import hf_hub_download
-    f = hf_hub_download("netease-youdao/Confucius4-TTS", filename="t2s_model.safetensors")
+    # Prefer an explicit local file, then a manual download dir, then HF cache.
+    f = path
+    if f is None:
+        local = os.path.join(REPO_ROOT, "downloads", "t2s_model.safetensors")
+        if os.path.exists(local):
+            f = local
+        else:
+            from huggingface_hub import hf_hub_download
+            f = hf_hub_download("netease-youdao/Confucius4-TTS",
+                                filename="t2s_model.safetensors")
     sd = safetensors.torch.load_file(f, device="cpu")
     out_dir = os.path.join(out_base, "t2s")
     n = export_state_dict(sd, out_dir)
-    print(f"[t2s] exported {n} tensors -> {out_dir}")
+    print(f"[t2s] exported {n} tensors from {f} -> {out_dir}")
 
 
 def export_audio(out_base):
@@ -158,10 +166,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model", choices=list(EXPORTERS) + ["all"])
     ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument("--t2s-path", default=None,
+                    help="explicit path to t2s_model.safetensors")
     args = ap.parse_args()
     targets = list(EXPORTERS) if args.model == "all" else [args.model]
     for t in targets:
-        EXPORTERS[t](args.out)
+        if t == "t2s":
+            export_t2s(args.out, args.t2s_path)
+        else:
+            EXPORTERS[t](args.out)
 
 
 if __name__ == "__main__":
