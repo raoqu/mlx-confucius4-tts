@@ -1,51 +1,84 @@
 // c4tts_cli: command-line entry point for the standalone Confucius4-TTS engine.
 //
-// At this stage (Phase A1, see docs/PLAN.md) it does two things:
-//   1. reports its version, and
-//   2. runs a tiny MLX computation on the default device so we can confirm the
-//      MLX C++ backend links and executes on this machine.
+// Subcommands:
+//   (none) / --version      report version (and run an MLX backend smoke test)
+//   synth                    full TTS: prompt wav + token ids -> waveform wav
 //
-// The full `synth(text, lang, prompt_wav) -> wav` pipeline is added over the
-// later phases.
+// Text tokenization (SentencePiece) and normalization run upstream; `synth`
+// consumes integer token ids (one per line) so the C++ engine is Python-free.
 
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <string>
+#include <vector>
 
+#include "c4tts/pipeline.h"
+#include "c4tts/wav_io.h"
 #include "mlx/mlx.h"
 
 namespace mx = mlx::core;
 
 namespace {
-constexpr const char* kVersion = "c4tts 0.0.1 (phase A1: scaffold)";
+constexpr const char* kVersion = "c4tts 0.1.0";
 
 int smoke_test() {
-  // A trivial elementwise op forces MLX to allocate, dispatch to the Metal
-  // backend, and evaluate. If this prints [5, 7, 9] we have a working backend.
   auto a = mx::array({1.0f, 2.0f, 3.0f});
   auto b = mx::array({4.0f, 5.0f, 6.0f});
   auto c = mx::add(a, b);
   mx::eval(c);
-
-  const float* data = c.data<float>();
-  std::cout << "mlx smoke test: [" << data[0] << ", " << data[1] << ", "
-            << data[2] << "]" << std::endl;
-
-  const bool ok = (data[0] == 5.0f && data[1] == 7.0f && data[2] == 9.0f);
-  std::cout << "default device: "
-            << (mx::default_device().type == mx::Device::gpu ? "gpu (Metal)"
-                                                             : "cpu")
+  const float* d = c.data<float>();
+  std::cout << "mlx smoke test: [" << d[0] << ", " << d[1] << ", " << d[2] << "]"
+            << " on "
+            << (mx::default_device().type == mx::Device::gpu ? "gpu (Metal)" : "cpu")
             << std::endl;
-  return ok ? 0 : 1;
+  return (d[0] == 5 && d[1] == 7 && d[2] == 9) ? 0 : 1;
+}
+
+std::string arg(int argc, char** argv, const std::string& key,
+                const std::string& dflt = "") {
+  for (int i = 1; i < argc - 1; ++i)
+    if (key == argv[i]) return argv[i + 1];
+  return dflt;
+}
+
+int synth(int argc, char** argv) {
+  const std::string weights = arg(argc, argv, "--weights", "weights");
+  const std::string prompt = arg(argc, argv, "--prompt");
+  const std::string tokens = arg(argc, argv, "--tokens");
+  const std::string out = arg(argc, argv, "--out", "output.wav");
+  if (prompt.empty() || tokens.empty()) {
+    std::cerr << "usage: c4tts_cli synth --weights DIR --prompt ref.wav "
+                 "--tokens ids.txt --out out.wav\n";
+    return 2;
+  }
+
+  std::vector<int> ids;
+  std::ifstream tf(tokens);
+  int id;
+  while (tf >> id) ids.push_back(id);
+  if (ids.empty()) {
+    std::cerr << "c4tts: no token ids read from " << tokens << "\n";
+    return 2;
+  }
+
+  std::cout << "c4tts: loading weights from " << weights << " ...\n";
+  c4::Pipeline pipe(weights);
+  std::cout << "c4tts: synthesizing (" << ids.size() << " text tokens) ...\n";
+  c4::Tensor wav = pipe.synth(prompt, ids);
+  c4::write_wav(out, wav, pipe.sample_rate());
+  std::cout << "c4tts: wrote " << out << "\n";
+  return 0;
 }
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 2 && std::strcmp(argv[1], "synth") == 0) return synth(argc, argv);
   if (argc >= 2 && (std::strcmp(argv[1], "--version") == 0 ||
                     std::strcmp(argv[1], "-v") == 0)) {
     std::cout << kVersion << std::endl;
     return 0;
   }
-
   std::cout << kVersion << std::endl;
   return smoke_test();
 }

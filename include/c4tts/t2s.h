@@ -104,6 +104,20 @@ class Text2Semantic {
   Tensor generate_greedy(const Tensor& text_ids, const Tensor& condition_vector,
                          int max_new_tokens) const;
 
+  struct Generation {
+    Tensor codes;   // (B, T_gen) int — generated semantic tokens (no BOS/EOS)
+    Tensor latent;  // (B, T_gen, D) — GPT-2 hidden states over those tokens
+  };
+
+  // Autoregressive generation with logits processors, returning codes AND the
+  // LM latent (matching llm.py generate(return_latent=True)). `sample`=false is
+  // greedy (deterministic); otherwise top-k/top-p/temperature sampling.
+  Generation generate(const Tensor& text_ids, const Tensor& condition_vector,
+                      int max_new_tokens, bool sample = false,
+                      float temperature = 1.0f, int top_k = 0,
+                      float top_p = 1.0f, float repetition_penalty = 1.0f,
+                      uint64_t seed = 0) const;
+
  private:
   // Builds [cond, text, sem] inputs_embeds for the given semantic prefix.
   Tensor assemble(const Tensor& text_ids, const Tensor& semantic_codes,

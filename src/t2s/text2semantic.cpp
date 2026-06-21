@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "c4tts/nn.h"
@@ -91,6 +94,71 @@ Tensor Text2Semantic::generate_greedy(const Tensor& text_ids,
   for (int i = 0; i < n; ++i) heap[i] = generated[i];
   return mx::array(static_cast<void*>(heap), mx::Shape{B, n}, mx::int32,
                    [](void* p) { delete[] static_cast<int32_t*>(p); });
+}
+
+Text2Semantic::Generation Text2Semantic::generate(
+    const Tensor& text_ids, const Tensor& condition_vector, int max_new_tokens,
+    bool sample, float temperature, int top_k, float top_p,
+    float repetition_penalty, uint64_t seed) const {
+  const int B = text_ids.shape(0);
+  std::vector<int> generated;
+  Tensor sem = mx::full(mx::Shape{B, 1}, start_token_, mx::int32);  // BOS
+  uint64_t rng = seed ? seed : 0x9E3779B97F4A7C15ull;
+
+  for (int step = 0; step < max_new_tokens; ++step) {
+    Tensor inputs = assemble(text_ids, sem, condition_vector);
+    Tensor logit_t = mx::flatten(last_logits(inputs));  // (vocab,)
+    mx::eval(logit_t);
+    const float* ld = logit_t.data<float>();
+    std::vector<float> logits(ld, ld + logit_t.size());
+
+    sampling::repetition_penalty(logits, generated, repetition_penalty);
+    int tok;
+    if (!sample) {
+      tok = sampling::argmax(logits);
+    } else {
+      sampling::temperature(logits, temperature);
+      sampling::top_k(logits, top_k);
+      sampling::top_p(logits, top_p);
+      // softmax + inverse-CDF sample with a small xorshift RNG.
+      float maxv = -1e30f;
+      for (float v : logits) maxv = std::max(maxv, v);
+      double sum = 0;
+      std::vector<double> probs(logits.size());
+      for (size_t i = 0; i < logits.size(); ++i) {
+        probs[i] = std::isinf(logits[i]) ? 0.0 : std::exp((double)(logits[i] - maxv));
+        sum += probs[i];
+      }
+      rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+      double r = (double)(rng >> 11) / (double)(1ull << 53) * sum;
+      double acc = 0;
+      tok = (int)logits.size() - 1;
+      for (size_t i = 0; i < probs.size(); ++i) {
+        acc += probs[i];
+        if (r <= acc) { tok = (int)i; break; }
+      }
+    }
+    if (tok == stop_token_) break;
+    generated.push_back(tok);
+    Tensor col = mx::full(mx::Shape{B, 1}, tok, mx::int32);
+    sem = mx::concatenate({sem, col}, 1);
+  }
+
+  // Recompute latent over [BOS, codes...] using the raw GPT-2 output (incl ln_f).
+  const int n = static_cast<int>(generated.size());
+  int32_t* heap = new int32_t[n > 0 ? n : 1];
+  for (int i = 0; i < n; ++i) heap[i] = generated[i];
+  Tensor codes(static_cast<void*>(heap), mx::Shape{B, n}, mx::int32,
+               [](void* p) { delete[] static_cast<int32_t*>(p); });
+
+  Tensor inputs = assemble(text_ids, sem, condition_vector);  // sem = [BOS, codes]
+  Tensor hidden = gpt_.forward(inputs);
+  const int text_len = text_ids.shape(1);
+  // latent = hidden[:, 1+text_len : 1+text_len+n]  (the generated-token positions)
+  Tensor latent = mx::slice(
+      hidden, mx::Shape{0, 1 + text_len, 0},
+      mx::Shape{B, 1 + text_len + n, hidden.shape(2)});
+  return Generation{codes, latent};
 }
 
 }  // namespace t2s

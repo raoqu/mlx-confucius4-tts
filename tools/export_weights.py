@@ -123,11 +123,23 @@ def export_campplus(out_base):
     print(f"[campplus] exported {n} tensors -> {out_dir}")
 
 
+def export_audio(out_base):
+    # Baked mel constants for the 22.05 kHz reference-mel front end.
+    from librosa.filters import mel as librosa_mel_fn
+    out_dir = os.path.join(out_base, "audio")
+    os.makedirs(out_dir, exist_ok=True)
+    basis = librosa_mel_fn(sr=22050, n_fft=1024, n_mels=80, fmin=0, fmax=None)
+    _save(out_dir, "mel_basis", basis.astype("float32"))
+    _save(out_dir, "hann", torch.hann_window(1024).numpy().astype("float32"))
+    print(f"[audio] mel_basis + hann -> {out_dir}")
+
+
 EXPORTERS = {
     "s2a": export_s2a,
     "bigvgan": export_bigvgan,
     "w2vbert": export_w2vbert,
     "campplus": export_campplus,
+    "audio": export_audio,
 }
 
 
