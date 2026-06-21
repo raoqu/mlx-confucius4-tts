@@ -133,12 +133,14 @@ Flags: `--web` (serve the console), `--server` (API only), `--web-key KEY`
 
 Performance (env vars, honored by both `synth` and the server):
 
-- `C4TTS_QUANT=8` — quantize the T2S GPT-2 projection weights to 8-bit (affine,
-  group 64). The M=1 autoregressive decode is weight-bandwidth-bound, so 8-bit
-  weights (¼ the bytes of fp32) roughly **halve the T2S stage** (~2×) — the
-  largest win available, pulling overall RTF from ~0.9 to ~0.6 on long clips.
-  Logit fidelity stays at cosine 0.9999 (tokens preserved); when token counts
-  align the output waveform matches fp32 at cosine 0.99995.
+- **`synth` and the server default to 8-bit weight quantization** (`C4TTS_QUANT=8`)
+  for the T2S GPT-2 projections (affine, group 64). The M=1 autoregressive
+  decode is weight-bandwidth-bound, so 8-bit weights (¼ the bytes of fp32)
+  roughly **halve the T2S stage** (~2×) — the largest win available, pulling
+  overall RTF from ~0.9 to ~0.6 on long clips. Logit fidelity stays at cosine
+  0.9999 (tokens preserved); when token counts align the output waveform
+  matches fp32 at cosine 0.99995. Set `C4TTS_QUANT=0` to opt back to the exact
+  fp32 path. (The library and golden tests keep the fp32 default.)
 - `C4TTS_QUANT=4` — 4-bit. Only ~7% faster than 8-bit (the decode is already
   near bandwidth-satisfied at 8-bit) but markedly lossier: logit cosine ~0.97,
   and the semantic token stream drifts enough to change output length ±20%.

@@ -10,6 +10,7 @@
 #include <mach-o/dyld.h>
 
 #include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -182,6 +183,13 @@ int serve(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Default the product entrypoints to int8 weight quantization for the T2S
+  // decode (~2x on the dominant stage, logit cosine 0.9999, tokens preserved).
+  // Honored only if unset, so the user can override: C4TTS_QUANT=0 -> fp32,
+  // C4TTS_QUANT=4 -> 4-bit. The library/golden tests construct modules directly
+  // (not via main), so they keep the faithful fp32 default.
+  if (!std::getenv("C4TTS_QUANT")) ::setenv("C4TTS_QUANT", "8", /*overwrite=*/0);
+
   if (argc >= 2 && std::strcmp(argv[1], "synth") == 0) return synth(argc, argv);
   // Server mode: `serve` subcommand, or --web/--server anywhere in the args.
   if ((argc >= 2 && std::strcmp(argv[1], "serve") == 0) ||
