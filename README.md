@@ -73,14 +73,16 @@ Command-line example:
 # ./start.sh [PROMPT_WAV] [TEXT] [OUT_WAV] [-- extra c4tts_cli flags]
 ./start.sh output.wav "你好，欢迎使用 c4tts 语音合成引擎。" demo_out.wav -- --steps 25
 
-# or the binary directly:
-./c4tts/build/c4tts_cli synth --weights c4tts/weights \
-    --prompt output.wav --text "Hello, world. 你好世界" --out demo_out.wav
+# or the binary directly (English -> --lang en):
+./c4tts/build/c4tts_cli synth --weights c4tts/weights --prompt output.wav \
+    --lang en --text "Hello, this is a voice cloning demo." --out demo_out.wav
 ```
 
 `--prompt` is a reference voice clip (any sample rate) whose timbre is cloned;
-`--text` is the text to speak. Flags: `--steps N`, `--max-tokens N`, `--greedy`,
-`--bench`.
+`--text` is plain text to speak — the CLI wraps it in the model's trained prompt
+format `"You are a helpful assistant. {lang}:{text}"` automatically (pass
+`--lang zh|en|ja|...`, default `zh`; `--raw-text` to skip wrapping). Flags:
+`--steps N`, `--max-tokens N`, `--greedy`, `--bench`.
 
 ## Build
 
