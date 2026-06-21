@@ -1,6 +1,7 @@
 #include "c4tts/t2s.h"
 
 #include <cmath>
+#include <cstdlib>
 
 #include "c4tts/nn.h"
 #include "mlx/mlx.h"
@@ -19,16 +20,25 @@ Tensor gelu_new(const Tensor& x) {
                       mx::add(mx::array(1.0f), mx::tanh(inner)));
 }
 
-namespace {
-// GPT-2 Conv1D: weight stored (in, out); y = x @ W + b.
-Tensor conv1d_gpt(const Tensor& x, const Tensor& w, const Tensor& b) {
-  return mx::add(mx::matmul(x, w), b);
-}
-}  // namespace
-
 GPT2::GPT2(const WeightStore& w, const std::string& prefix, int n_layer,
            int n_head)
-    : w_(w), p_(prefix), n_layer_(n_layer), n_head_(n_head) {}
+    : w_(w), p_(prefix), n_layer_(n_layer), n_head_(n_head) {
+  const char* v = std::getenv("C4TTS_FP16");
+  fp16_ = v && *v && std::strcmp(v, "0") != 0;
+}
+
+// GPT-2 Conv1D projection y = x @ W (+ b), with optional fp16 matmul.
+Tensor GPT2::proj(const Tensor& x, const std::string& name) const {
+  Tensor w = w_.get(name + ".weight");
+  Tensor b = w_.get(name + ".bias");
+  if (!fp16_) return mx::add(mx::matmul(x, w), b);
+  auto it = half_cache_.find(name);
+  if (it == half_cache_.end()) {
+    it = half_cache_.emplace(name, mx::astype(w, mx::float16)).first;
+  }
+  Tensor y = mx::matmul(mx::astype(x, mx::float16), it->second);  // fp16 GEMV
+  return mx::add(mx::astype(y, mx::float32), b);                  // back to fp32
+}
 
 Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
                    int layer, int past_len) const {
@@ -39,8 +49,7 @@ Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
   Tensor ln1w = w_.get(p + "ln_1.weight"), ln1b = w_.get(p + "ln_1.bias");
   Tensor a = nn::layer_norm(x_in, &ln1w, &ln1b);
 
-  Tensor caw = w_.get(p + "attn.c_attn.weight"), cab = w_.get(p + "attn.c_attn.bias");
-  Tensor qkv = conv1d_gpt(a, caw, cab);  // (B, T, 3D)
+  Tensor qkv = proj(a, p + "attn.c_attn");  // (B, T, 3D)
   auto parts = mx::split(qkv, 3, 2);
   auto to_heads = [&](const Tensor& t) {
     return mx::transpose(mx::reshape(t, {B, T, n_head_, head_dim}), {0, 2, 1, 3});
@@ -58,30 +67,22 @@ Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
     cache->k[layer] = k;
     cache->v[layer] = v;
   }
-  const int T_tot = k.shape(2);
-
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
-  Tensor scores = mx::multiply(mx::matmul(q, mx::swapaxes(k, -1, -2)),
-                               mx::array(scale));  // (B,H,T,T_tot)
-  // Causal mask: query i (absolute pos past_len+i) may attend to key j<=that.
-  Tensor rows = mx::add(mx::reshape(mx::arange(T), {T, 1}), mx::array(past_len));
-  Tensor cols = mx::reshape(mx::arange(T_tot), {1, T_tot});
-  Tensor causal = mx::less_equal(cols, rows);  // (T, T_tot)
-  scores = mx::where(causal, scores, mx::array(-1e9f));
-  Tensor attn = mx::softmax(scores, -1);
-  Tensor ctx = mx::matmul(attn, v);  // (B,H,T,hd)
+  // Fused attention (one Metal kernel instead of scores-matmul + explicit
+  // mask build + softmax + context-matmul). "causal" aligns the T queries to
+  // the tail of the T_tot keys, which is exactly right for both full-sequence
+  // prefill (T == T_tot) and cached decode (T new queries at absolute
+  // positions past_len .. past_len+T-1 attending to past_len + T keys).
+  Tensor ctx = mx::fast::scaled_dot_product_attention(q, k, v, scale, "causal");
   ctx = mx::reshape(mx::transpose(ctx, {0, 2, 1, 3}), {B, T, D});
 
-  Tensor cpw = w_.get(p + "attn.c_proj.weight"), cpb = w_.get(p + "attn.c_proj.bias");
-  Tensor x = mx::add(x_in, conv1d_gpt(ctx, cpw, cpb));
+  Tensor x = mx::add(x_in, proj(ctx, p + "attn.c_proj"));
 
   // --- mlp ---
   Tensor ln2w = w_.get(p + "ln_2.weight"), ln2b = w_.get(p + "ln_2.bias");
   Tensor m = nn::layer_norm(x, &ln2w, &ln2b);
-  Tensor fcw = w_.get(p + "mlp.c_fc.weight"), fcb = w_.get(p + "mlp.c_fc.bias");
-  Tensor h = gelu_new(conv1d_gpt(m, fcw, fcb));
-  Tensor mpw = w_.get(p + "mlp.c_proj.weight"), mpb = w_.get(p + "mlp.c_proj.bias");
-  h = conv1d_gpt(h, mpw, mpb);
+  Tensor h = gelu_new(proj(m, p + "mlp.c_fc"));
+  h = proj(h, p + "mlp.c_proj");
   return mx::add(x, h);
 }
 

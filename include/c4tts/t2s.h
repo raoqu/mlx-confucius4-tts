@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "c4tts/tensor.h"
@@ -46,9 +47,20 @@ class GPT2 {
   Tensor block(const Tensor& x, const std::string& p, KVCache* cache, int layer,
                int past_len) const;
 
+  // Projection y = x @ W (+ b) for the four bandwidth-heavy GPT-2 projections.
+  // When fp16 compute is enabled (C4TTS_FP16), the matmul runs in float16
+  // (the weight read is the bottleneck for M=1 decode GEMVs, so half precision
+  // ~halves it) while the fp32 residual stream / norms are preserved: x is
+  // cast to fp16, multiplied by a cached fp16 weight, and the result cast back
+  // to fp32 before the bias add. With fp16 disabled this is a plain fp32 matmul.
+  Tensor proj(const Tensor& x, const std::string& name) const;
+
   const WeightStore& w_;
   std::string p_;
   int n_layer_, n_head_;
+  bool fp16_ = false;
+  // Cached fp16 copies of projection weights, keyed by weight name.
+  mutable std::unordered_map<std::string, Tensor> half_cache_;
 };
 
 // GPT-2's gelu_new (tanh approximation).
