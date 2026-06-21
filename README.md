@@ -20,13 +20,18 @@ text → (SentencePiece) → token ids → T2S (GPT-2 + speaker enc, AR) → sem
                           S2A (length regulator → DiT flow-matching + CFG ODE) → mel → BigVGAN → wav
 ```
 
-## Status — runs end-to-end on real weights
+## Status — text → speech, end to end, zero Python in the synth path
 
-The full pipeline runs in C++/MLX on Metal: prompt wav + text token ids →
-W2V-BERT/CAMPPlus/reference-mel → T2S (24-layer GPT-2 AR) → S2A (DiT flow
-matching + CFG) → BigVGAN → speech waveform, using the real checkpoints, with
-**no Python in the synth path** (Python is used only for one-time weight export
-and tokenization). Every stage is parity-verified against PyTorch.
+The full pipeline runs in C++/MLX on Metal: a **text string** + prompt wav →
+SentencePiece tokenizer → W2V-BERT/CAMPPlus/reference-mel → T2S (24-layer GPT-2
+AR) → S2A (DiT flow matching + CFG) → BigVGAN → speech waveform, using the real
+checkpoints. **No Python runs at inference** (Python is used only for one-time
+weight/vocab export). Every stage is parity-verified against PyTorch.
+
+```bash
+./build/c4tts_cli synth --weights weights --prompt ref.wav \
+    --text "You are a helpful assistant. 请用中文朗读接下来的文字:你好世界" --out out.wav
+```
 
 ## Parity-verified modules
 
@@ -85,12 +90,13 @@ c4tts/
 
 ## Remaining work
 
-The neural engine, audio DSP, and end-to-end pipeline are complete and verified
-on the real checkpoints. To make the `synth` path 100% self-contained (text in,
-no Python at all) two non-core pieces remain: a vendored C++ **SentencePiece**
-tokenizer (text → ids; currently produced upstream and fed via file) and the
-multilingual **text normalizer**. Performance is Phase H: KV-cache for the T2S
-AR loop (currently recomputed per step), custom Metal kernels for hotspots,
-weight quantization, and memory-mapped weight loading (today the engine loads
-~3.5 GB of `.npy` per run).
+The neural engine, audio DSP, SentencePiece tokenizer, and end-to-end pipeline
+are complete and verified on the real checkpoints. Remaining items are
+quality/perf, not core function:
+- **Text normalizer** — the reference applies multilingual number/punctuation
+  normalization + segmentation before tokenizing; c4tts currently tokenizes the
+  text as given.
+- **Phase H performance** — KV-cache for the T2S AR loop (today recomputed per
+  step), custom Metal kernels for hotspots, weight quantization, and
+  memory-mapped weight loading (today ~3.5 GB of `.npy` is read per run).
 ```
