@@ -85,8 +85,9 @@ format `"You are a helpful assistant. {lang}:{text}"` automatically (pass
 
 ## Build
 
-Requirements: macOS / Apple Silicon, CMake ≥ 3.24, recent Apple Clang, and the
-`mlx` Python wheel installed (its bundled C++ lib + CMake config are reused).
+Requirements: macOS / Apple Silicon, CMake ≥ 3.24, recent Apple Clang. By
+default MLX is reused from the `mlx` Python wheel (its bundled C++ lib + CMake
+config), which is convenient for development.
 
 ```bash
 cmake -S . -B build -DC4TTS_BUILD_TESTS=ON
@@ -94,6 +95,30 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure      # run the parity suite
 ./build/c4tts_cli --version
 ```
+
+### Python-free / self-contained binary
+
+The runtime never invokes a Python interpreter, but by default the binary loads
+`libmlx.dylib` from the wheel's `site-packages`. Two ways to remove that:
+
+- **Vendor the prebuilt MLX artifacts (no Xcode needed):**
+  ```bash
+  cmake -S . -B build -DC4TTS_SELFCONTAINED=ON && cmake --build build -j
+  ```
+  Copies `libmlx.dylib` + `libjaccl.dylib` + `mlx.metallib` next to the binary
+  and sets the rpath to `@executable_path`. Ship `c4tts_cli` + those 3 files +
+  `bin/` and it runs on a Mac with **no Python/conda at all** (verified under a
+  fully scrubbed `env -i`). MLX/Metal are still prebuilt binaries, just relocated.
+
+- **Build MLX from source (fully from source; needs full Xcode):**
+  ```bash
+  cmake -S . -B build -DC4TTS_MLX_FROM_SOURCE=ON && cmake --build build -j
+  ```
+  FetchContents MLX (`C4TTS_MLX_TAG`, default v0.31.2) and links it statically —
+  no MLX dylib, no Python at build or runtime. Requires the Metal shader
+  compiler (`xcrun metal`), which ships **only with full Xcode**, not the
+  Command Line Tools (even JIT precompiles a base metallib). Configure fails
+  with guidance if it's missing.
 
 ## Run
 
