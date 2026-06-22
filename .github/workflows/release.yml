@@ -1,0 +1,62 @@
+name: Release (macOS arm64)
+
+# Push a tag like `v0.1.0` to build a self-contained Apple-Silicon binary and
+# publish it as a GitHub Release.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+jobs:
+  build-macos:
+    runs-on: macos-14 # Apple Silicon (arm64), ships full Xcode
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Building MLX from source needs the Metal shader compiler (`xcrun metal`),
+      # which ships only with full Xcode, not the Command Line Tools.
+      - name: Select full Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcrun --find metal
+          cmake --version
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DC4TTS_MLX_FROM_SOURCE=ON \
+            -DC4TTS_MLX_METAL_JIT=OFF \
+            -DC4TTS_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Smoke test
+        run: ./build/c4tts_cli --version
+
+      - name: Package
+        id: package
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          pkg="c4tts-${tag}-macos-arm64"
+          mkdir -p "dist/${pkg}"
+          cp build/c4tts_cli "dist/${pkg}/"
+          cp build/mlx.metallib "dist/${pkg}/"
+          cp README.md model.md "dist/${pkg}/" 2>/dev/null || true
+          tar -C dist -czf "${pkg}.tar.gz" "${pkg}"
+          shasum -a 256 "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
+          echo "pkg=${pkg}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.package.outputs.pkg }}.tar.gz
+            ${{ steps.package.outputs.pkg }}.tar.gz.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
