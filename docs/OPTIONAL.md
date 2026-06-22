@@ -93,12 +93,16 @@ T2S 占 54%，AR 是"每次一个 token"的死结。打破它的标准武器：
 
 这是把整体推到 2× 以上的最关键一步。需要少量训练 + 验证逻辑。
 
-### B2. S2A CFG 蒸馏 / CFG 间隔
-去掉每步那次 unconditional 前向（CFG 的 2× 批）：guidance distillation，或只在部分步
-施加 CFG → S2A 再 ~1.5–2×。
+### B2. S2A CFG 间隔 —— ✅ 已落地（opt-in，无需训练）
+profiling 证实：S2A 每步跑 2 次 DiT 前向（cond + uncond），第 2 次 ~占 S2A 一半。
+不必蒸馏——直接用 **CFG 间隔**（`C4TTS_CFG_LO/HI`）：只在 `lo<=t<=hi` 施加 guidance，
+其余步只跑 cond。实测：`CFG_HI=0.5` → S2A ~1.35×、log-mel RMSE 0.10（`0.7` 更稳 RMSE 0.06）。
+**guidance 在早期关键 → 降 HI（跳过晚期）安全，抬 LO（跳过早期）质量崩**（mid 区间 RMSE 0.72）。
+与 ① AB2 正交：**ab2-16 + cfg_hi=0.6 ≈ S2A 2×**。默认全 CFG 不变。
+（guidance distillation 能更彻底地省掉 uncond 前向，但需训练；CFG 间隔是免训练的近似。）
 
-> Tier A + B 叠加：T2S ~2×、S2A ~3×（求解器 × CFG）、BigVGAN ~1.7× → 整体 **~2.2–2.6×**。
-> 这是现实可达 2–3× 的主路径。
+> Tier A（①求解器 + B2 CFG间隔）已让 S2A 达 ~2×（免训练）。BigVGAN fp16 实测无效（见上）。
+> T2S 仍是闸门——整体要冲 2–3× 仍需 B1 投机解码（④，需训练）。
 
 ---
 
