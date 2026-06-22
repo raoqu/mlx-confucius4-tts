@@ -8,6 +8,7 @@
 // consumes integer token ids (one per line) so the C++ engine is Python-free.
 
 #include <mach-o/dyld.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <climits>
@@ -64,26 +65,39 @@ std::string exe_dir() {
   char buf[PATH_MAX];
   uint32_t sz = sizeof(buf);
   if (_NSGetExecutablePath(buf, &sz) == 0) {
-    std::string p(buf);
-    auto slash = p.find_last_of('/');
-    if (slash != std::string::npos) return p.substr(0, slash);
+    char real[PATH_MAX];
+    const char* p = realpath(buf, real) ? real : buf;  // resolve symlinks/..
+    std::string s(p);
+    auto slash = s.find_last_of('/');
+    if (slash != std::string::npos) return s.substr(0, slash);
   }
   return "";
 }
 
-// Default model directory: <repo>/bin, resolved relative to the executable
-// (<repo>/build/c4tts_cli) so it works regardless of the current dir.
-std::string default_weights_dir() {
-  const std::string d = exe_dir();
-  return d.empty() ? "bin" : d + "/../bin";
+bool dir_exists(const std::string& path) {
+  struct stat st {};
+  return !path.empty() && stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFDIR);
 }
 
-// Default voice store: <repo>/voices, anchored to the executable so voices
-// persist regardless of the working directory the server is launched from.
-std::string default_voice_store() {
+// Resolves a runtime data directory `name` (e.g. "bin", "voices") by trying, in
+// order: (1) <exe_dir>/name — alongside the binary (standalone/dist layout),
+// (2) ./name — the current working directory, (3) <exe_dir>/../name — the dev
+// layout (binary in build/, data in the repo root). Returns the first that
+// exists; if none do, returns (1) so writers (e.g. the voice store) create it
+// next to the binary, which stays stable regardless of the working directory.
+std::string resolve_runtime_dir(const std::string& name) {
   const std::string d = exe_dir();
-  return d.empty() ? "voices" : d + "/../voices";
+  if (!d.empty() && dir_exists(d + "/" + name)) return d + "/" + name;
+  if (dir_exists(name)) return name;
+  if (!d.empty() && dir_exists(d + "/../" + name)) return d + "/../" + name;
+  return d.empty() ? name : d + "/" + name;
 }
+
+// Default model weights directory ("bin") and voice store ("voices"), using the
+// shared exe-dir-then-CWD resolution so both build/c4tts_cli and ./c4tts_cli
+// work without an explicit flag.
+std::string default_weights_dir() { return resolve_runtime_dir("bin"); }
+std::string default_voice_store() { return resolve_runtime_dir("voices"); }
 
 int synth(int argc, char** argv) {
   std::string weights = arg(argc, argv, "--weights");
