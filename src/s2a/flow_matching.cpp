@@ -56,13 +56,22 @@ Tensor ConditionalCFM::solve_euler(Tensor x, const Tensor& t_span,
   Tensor zero_spks = mx::zeros_like(spks);
   Tensor zero_prompt = mx::zeros_like(prompt_x);
 
-  // Velocity field v(x, t) with classifier-free guidance (one estimator call,
-  // or two when CFG is on).
-  auto velocity = [&](const Tensor& xc, float tc) {
+  // CFG interval (C4TTS_CFG_LO / C4TTS_CFG_HI, default [0,1] = every step):
+  // apply classifier-free guidance — i.e. the extra unconditional DiT forward —
+  // only while lo <= t <= hi, and use the conditional field alone elsewhere.
+  // Guidance matters most in part of the trajectory, so a narrower interval
+  // skips ~half the uncond forwards with little quality loss (the 2nd DiT call
+  // per step is ~half of S2A).
+  float cfg_lo = 0.0f, cfg_hi = 1.0f;
+  if (const char* v = std::getenv("C4TTS_CFG_LO")) cfg_lo = std::atof(v);
+  if (const char* v = std::getenv("C4TTS_CFG_HI")) cfg_hi = std::atof(v);
+
+  // Velocity field v(x, t). Applies CFG (a second, unconditional estimator
+  // call) only when `with_cfg`; otherwise returns the conditional field.
+  auto velocity = [&](const Tensor& xc, float tc, bool with_cfg) {
     Tensor t_arr = mx::full(mx::Shape{B}, tc);  // (B,) current time
     Tensor v = estimator_.forward(xc, mask, mu, t_arr, spks, prompt_x);
-    if (cfg_rate > 0) {
-      // Combine conditional and unconditional fields.
+    if (with_cfg) {
       Tensor uncond_v =
           estimator_.forward(xc, mask, zero_mu, t_arr, zero_spks, zero_prompt);
       v = mx::subtract(mx::multiply(mx::array(1.0f + cfg_rate), v),
@@ -85,7 +94,8 @@ Tensor ConditionalCFM::solve_euler(Tensor x, const Tensor& t_span,
   Tensor v_prev = x;  // placeholder; overwritten after the first step
   for (int step = 1; step < n; ++step) {
     prof::Timer st;
-    Tensor v = velocity(x, t);
+    const bool with_cfg = cfg_rate > 0 && t >= cfg_lo && t <= cfg_hi;
+    Tensor v = velocity(x, t, with_cfg);
     // AB2: x += dt*(1.5 v - 0.5 v_prev); else Euler (also AB2's first step).
     Tensor step_v = (ab2 && have_prev)
         ? mx::subtract(mx::multiply(mx::array(1.5f), v),

@@ -172,6 +172,14 @@ Performance (env vars, honored by both `synth` and the server):
   Euler at equal steps, so you can cut `--steps` and keep quality: `--steps 16`
   ≈ Euler-25 at ~1.5× the S2A stage, `--steps 12` ~2× with a small quality
   tradeoff (validated by log-mel distance). Default stays Euler-25.
+- `C4TTS_CFG_HI=h` (and `C4TTS_CFG_LO=l`, default interval `[0,1]`) — apply
+  classifier-free guidance in the S2A diffusion only while `l <= t <= h`, using
+  the conditional field alone elsewhere. The extra unconditional DiT forward is
+  ~half of S2A, so skipping it on late steps cuts cost: `C4TTS_CFG_HI=0.5` ≈
+  1.35× on S2A at log-mel RMSE ~0.10 vs full CFG (`0.7` is safer, RMSE ~0.06).
+  Guidance is critical early, so **lowering `HI` (skip late) is safe; raising
+  `LO` (skip early) badly degrades quality** — don't. Stacks with `ab2`:
+  ab2-16 + cfg_hi=0.6 ≈ 2× on S2A. Default (full CFG) is unchanged.
 - `C4TTS_BATCH=1` — for long (multi-segment) text, batch the T2S decode across
   segments instead of one at a time. Lossless (bit-identical output), but only
   a net win for several balanced segments — for few or length-imbalanced
