@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 
+#include "c4tts/profile.h"
 #include "c4tts/s2a.h"
 #include "mlx/mlx.h"
 
@@ -83,6 +84,7 @@ Tensor ConditionalCFM::solve_euler(Tensor x, const Tensor& t_span,
   bool have_prev = false;
   Tensor v_prev = x;  // placeholder; overwritten after the first step
   for (int step = 1; step < n; ++step) {
+    prof::Timer st;
     Tensor v = velocity(x, t);
     // AB2: x += dt*(1.5 v - 0.5 v_prev); else Euler (also AB2's first step).
     Tensor step_v = (ab2 && have_prev)
@@ -96,6 +98,7 @@ Tensor ConditionalCFM::solve_euler(Tensor x, const Tensor& t_span,
     if (step < n - 1) dt = ts[step + 1] - t;
     x = mx::multiply(x, region_keep);  // re-zero prompt region each step
     mx::eval(x);  // bound the lazy graph across ODE steps
+    prof::lap_cpu(cfg_rate > 0 ? "s2a.solve_step(cfg2)" : "s2a.solve_step", st);
   }
   return mx::astype(x, mx::float32);
 }

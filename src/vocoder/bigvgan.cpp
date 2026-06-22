@@ -3,6 +3,7 @@
 #include <string>
 
 #include "c4tts/nn.h"
+#include "c4tts/profile.h"
 #include "mlx/mlx.h"
 
 namespace c4 {
@@ -54,9 +55,11 @@ Tensor BigVGAN::amp_block1(const Tensor& x_in, const std::string& prefix,
 }
 
 Tensor BigVGAN::forward(const Tensor& mel) const {
+  prof::Timer bt;
   // conv_pre: Conv1d(80, 1536, 7, pad 3)
   Tensor cpw = w_.get("conv_pre.weight"), cpb = w_.get("conv_pre.bias");
   Tensor x = nn::conv1d(mel, cpw, &cpb, /*stride=*/1, /*padding=*/3);
+  prof::lap("bigvgan.conv_pre", x, bt);
 
   const int num_kernels = static_cast<int>(resblock_kernels_.size());
   for (size_t i = 0; i < upsample_rates_.size(); ++i) {
@@ -76,6 +79,7 @@ Tensor BigVGAN::forward(const Tensor& mel) const {
       xs = (j == 0) ? block : mx::add(xs, block);
     }
     x = mx::divide(xs, mx::array(static_cast<float>(num_kernels)));
+    prof::lap("bigvgan.upsample+resblocks", x, bt);
   }
 
   // Post: snakebeta -> conv_post (no bias) -> clamp[-1,1] (use_tanh_at_final=False)
@@ -84,7 +88,9 @@ Tensor BigVGAN::forward(const Tensor& mel) const {
                              down_filter_);
   Tensor cqw = w_.get("conv_post.weight");
   x = nn::conv1d(x, cqw, /*bias=*/nullptr, /*stride=*/1, /*padding=*/3);
-  return mx::clip(x, mx::array(-1.0f), mx::array(1.0f));
+  Tensor out = mx::clip(x, mx::array(-1.0f), mx::array(1.0f));
+  prof::lap("bigvgan.post", out, bt);
+  return out;
 }
 
 }  // namespace vocoder

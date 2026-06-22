@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "c4tts/audio.h"
+#include "c4tts/profile.h"
 #include "c4tts/wav_io.h"
 #include "mlx/mlx.h"
 
@@ -46,24 +47,30 @@ Pipeline::Pipeline(const std::string& weights_root)
       bigvgan_(bigvgan_w_) {}
 
 Pipeline::Prompt Pipeline::make_prompt(const std::string& path) const {
+  prof::Timer pt;
   WavData wav = read_wav(path);
   Tensor w16 = resample(wav.samples, wav.sample_rate, 16000);
   Tensor w22 = resample(wav.samples, wav.sample_rate, 22050);
+  prof::lap("prompt.wav+resample", w22, pt);
 
   // Semantic features: seamless -> W2V-BERT[17] -> normalize.
   Tensor feats = mx::expand_dims(seamless_features(w16), 0);  // (1, T, 160)
+  prof::lap("prompt.seamless_feats", feats, pt);
   Tensor h = w2vbert_.forward(feats, 17);                     // (1, T, 1024)
   Tensor sem = mx::divide(mx::subtract(h, w2v_w_.get("semantic_mean")),
                           w2v_w_.get("semantic_std"));
+  prof::lap("prompt.w2vbert", sem, pt);
 
   // Style embedding: kaldi fbank -> mean-sub -> CAMPPlus.
   Tensor fb = kaldi_fbank(w16, 80, 16000.0f);
   fb = mx::subtract(fb, mx::mean(fb, 0, /*keepdims=*/true));
   Tensor style = campplus_.forward(mx::expand_dims(fb, 0));   // (1, 192)
+  prof::lap("prompt.campplus", style, pt);
 
   // Reference mel at 22.05 kHz: (1, T_mel, 80).
   Tensor mel = mel_spectrogram(w22, audio_w_.get("mel_basis"), audio_w_.get("hann"));
   Tensor ref_mel = mx::expand_dims(mx::transpose(mel, {1, 0}), 0);
+  prof::lap("prompt.ref_mel", ref_mel, pt);
 
   return Prompt{sem, style, ref_mel};
 }

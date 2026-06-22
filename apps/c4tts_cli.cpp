@@ -21,6 +21,7 @@
 #include "c4tts/lang_tokens.h"
 #include "c4tts/longform.h"
 #include "c4tts/pipeline.h"
+#include "c4tts/profile.h"
 #include "c4tts/server.h"
 #include "c4tts/tokenizer.h"
 #include "c4tts/wav_io.h"
@@ -188,6 +189,7 @@ int synth(int argc, char** argv) {
   c4::Tensor wav = c4::cross_fade_concat(waves, pipe.sample_rate());
   c4::write_wav(out, wav, pipe.sample_rate());
   std::cout << "c4tts: wrote " << out << "\n";
+  c4::prof::report();  // detailed component breakdown when C4TTS_PROFILE is set
   return 0;
 }
 

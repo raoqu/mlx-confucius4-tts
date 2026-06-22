@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "c4tts/nn.h"
+#include "c4tts/profile.h"
 #include "c4tts/t2s.h"
 #include "mlx/mlx.h"
 
@@ -125,13 +126,16 @@ Text2Semantic::Generation Text2Semantic::generate(
   KVCache cache;
   int past = 0;
   Tensor hidden = gpt_.forward(prefix, cache, past);
+  prof::eval_add("t2s.prefill", hidden);
   past = prefix.shape(1);
   Tensor cur = mx::slice(hidden, mx::Shape{0, past - 1, 0},
                          mx::Shape{B, past, D});  // (B,1,D)
 
   for (int step = 0; step < max_new_tokens; ++step) {
+    prof::Timer st;
     Tensor logit_t = head(cur);
     mx::eval(logit_t);
+    prof::lap_cpu("t2s.decode.head", st);  // cur materialized by prev step's forward eval (profile mode)
     const float* ld = logit_t.data<float>();
     std::vector<float> logits(ld, ld + logit_t.size());
 
@@ -163,6 +167,7 @@ Text2Semantic::Generation Text2Semantic::generate(
     if (tok == stop_token_) break;
     generated.push_back(tok);
     latents.push_back(cur);  // cur is the latent that predicted this token
+    prof::lap_cpu("t2s.decode.sample", st);
 
     // Embed the new token at semantic position (step+1) (BOS occupied pos 0).
     Tensor tok_arr = mx::full(mx::Shape{B, 1}, tok, mx::int32);
@@ -171,6 +176,9 @@ Text2Semantic::Generation Text2Semantic::generate(
         {1, 1, D});
     Tensor new_emb = mx::add(nn::embedding(tok_arr, sem_w), pos_row);  // (B,1,D)
     cur = gpt_.forward(new_emb, cache, past);  // (B,1,D)
+    // In profile mode, eval here to attribute forward vs head separately (adds
+    // a per-step sync); normally cur stays lazy until the next head().
+    if (prof::enabled()) prof::lap("t2s.decode.forward", cur, st);
     past += 1;
   }
 

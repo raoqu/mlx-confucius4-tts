@@ -1,6 +1,7 @@
 #include <vector>
 
 #include "c4tts/nn.h"
+#include "c4tts/profile.h"
 #include "c4tts/s2a.h"
 #include "mlx/mlx.h"
 
@@ -34,6 +35,7 @@ Tensor MaskedDiffWithXvec::inference(const Tensor& codes, const Tensor& lm_laten
                                      float cfg_rate) const {
   const int B = codes.shape(0);
   const int T_ref = prompt_feat.shape(1);
+  prof::Timer et;
 
   // Embed semantic tokens -> (B, T_sem, 1024); concat with LM latent; project.
   Tensor sem = mx::transpose(input_embedding_.forward(codes), {0, 2, 1});  // (B,T,1024)
@@ -56,6 +58,7 @@ Tensor MaskedDiffWithXvec::inference(const Tensor& codes, const Tensor& lm_laten
   Tensor t_span = mx::linspace(0.0f, 1.0f, n_timesteps + 1);
   Tensor mask = mx::ones({B, T_total}, mx::float32);
   Tensor prompt = mx::transpose(prompt_feat, {0, 2, 1});                   // (B,80,T_ref)
+  prof::lap("s2a.encoder", cat_condition, et);
 
   Tensor mel_full = decoder_.solve_euler(z, t_span, mask, prompt, cat_condition,
                                          embedding, cfg_rate);             // (B,80,T_total)
