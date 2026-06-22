@@ -1,5 +1,7 @@
 #include "c4tts/weights.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <sys/stat.h>
 
@@ -31,7 +33,14 @@ Tensor WeightStore::get(const std::string& name) const {
     throw std::runtime_error("WeightStore: missing weight '" + name + "' in " +
                              root_);
   }
-  Tensor t = load_npy_mmap(path_for(name));  // zero-copy for f4/i4 weight packs
+  const std::string path = path_for(name);
+  // Audit hook: when C4TTS_DUMP_WEIGHTS is set, append each loaded .npy path so
+  // the actually-used weight set can be diffed against bin/ (read env once).
+  static const char* dump = std::getenv("C4TTS_DUMP_WEIGHTS");
+  if (dump) {
+    if (std::FILE* fp = std::fopen(dump, "a")) { std::fprintf(fp, "%s\n", path.c_str()); std::fclose(fp); }
+  }
+  Tensor t = load_npy_mmap(path);  // zero-copy for f4/i4 weight packs
   cache_.emplace(name, t);
   return t;
 }
