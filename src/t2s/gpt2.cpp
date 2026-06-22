@@ -73,7 +73,7 @@ Tensor GPT2::proj(const Tensor& x, const std::string& name) const {
 }
 
 Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
-                   int layer, int past_len) const {
+                   int layer, int past_len, const Tensor* attn_mask) const {
   const int B = x_in.shape(0), T = x_in.shape(1), D = x_in.shape(2);
   const int head_dim = D / n_head_;
 
@@ -101,11 +101,13 @@ Tensor GPT2::block(const Tensor& x_in, const std::string& p, KVCache* cache,
   }
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   // Fused attention (one Metal kernel instead of scores-matmul + explicit
-  // mask build + softmax + context-matmul). "causal" aligns the T queries to
-  // the tail of the T_tot keys, which is exactly right for both full-sequence
-  // prefill (T == T_tot) and cached decode (T new queries at absolute
-  // positions past_len .. past_len+T-1 attending to past_len + T keys).
-  Tensor ctx = mx::fast::scaled_dot_product_attention(q, k, v, scale, "causal");
+  // mask build + softmax + context-matmul). With no explicit mask, "causal"
+  // aligns the T queries to the tail of the T_tot keys (correct for both
+  // full-sequence prefill and cached decode). An explicit additive mask
+  // (batched generation, to mask left-padding) overrides causal mode.
+  Tensor ctx = attn_mask
+      ? mx::fast::scaled_dot_product_attention(q, k, v, scale, "", *attn_mask)
+      : mx::fast::scaled_dot_product_attention(q, k, v, scale, "causal");
   ctx = mx::reshape(mx::transpose(ctx, {0, 2, 1, 3}), {B, T, D});
 
   Tensor x = mx::add(x_in, proj(ctx, p + "attn.c_proj"));
@@ -128,14 +130,14 @@ Tensor GPT2::forward(const Tensor& inputs_embeds) const {
 }
 
 Tensor GPT2::forward(const Tensor& inputs_embeds, KVCache& cache,
-                     int past_len) const {
+                     int past_len, const Tensor* attn_mask) const {
   if (cache.empty()) {
     cache.k.assign(n_layer_, inputs_embeds);  // placeholder; overwritten below
     cache.v.assign(n_layer_, inputs_embeds);
   }
   Tensor x = inputs_embeds;
   for (int i = 0; i < n_layer_; ++i) {
-    x = block(x, p_ + "h." + std::to_string(i) + ".", &cache, i, past_len);
+    x = block(x, p_ + "h." + std::to_string(i) + ".", &cache, i, past_len, attn_mask);
   }
   Tensor lfw = w_.get(p_ + "ln_f.weight"), lfb = w_.get(p_ + "ln_f.bias");
   return nn::layer_norm(x, &lfw, &lfb);

@@ -38,14 +38,21 @@ class GPT2 {
   // in `inputs_embeds` (T_new), attending to `past_len` cached positions plus
   // the new ones; appends the new keys/values to `cache`. Returns the ln_f'd
   // hidden states for the new tokens (B, T_new, D).
-  Tensor forward(const Tensor& inputs_embeds, KVCache& cache, int past_len) const;
+  //
+  // `attn_mask`, if non-null, is an additive attention mask broadcastable to
+  // (B, H, T_new, T_total) (0 where allowed, large-negative where masked); it
+  // replaces the implicit "causal" mode. Used by batched generation to mask the
+  // left-padding of variable-length prompts.
+  Tensor forward(const Tensor& inputs_embeds, KVCache& cache, int past_len,
+                 const Tensor* attn_mask = nullptr) const;
 
   int n_layer() const { return n_layer_; }
 
  private:
   // Unified block: plain when cache==nullptr, else uses/updates cache[layer].
+  // `attn_mask` (additive) overrides causal masking when non-null.
   Tensor block(const Tensor& x, const std::string& p, KVCache* cache, int layer,
-               int past_len) const;
+               int past_len, const Tensor* attn_mask = nullptr) const;
 
   // Projection y = x @ W (+ b) for the four bandwidth-heavy GPT-2 projections.
   // When fp16 compute is enabled (C4TTS_FP16), the matmul runs in float16
@@ -149,6 +156,18 @@ class Text2Semantic {
                       float temperature = 1.0f, int top_k = 0,
                       float top_p = 1.0f, float repetition_penalty = 1.0f,
                       uint64_t seed = 0) const;
+
+  // Batched generation of N independent segments that share the same condition
+  // (e.g. the segments of one long utterance). Variable-length prompts are
+  // left-padded and decoded as one batch, turning the M=1 decode GEMVs into
+  // M=N GEMMs — large throughput win on the dispatch-bound T2S decode for long
+  // text. Returns one Generation per input segment (same order). `seed` is
+  // offset per segment for independent sampling.
+  std::vector<Generation> generate_batch(
+      const std::vector<std::vector<int>>& text_ids_list,
+      const Tensor& condition_vector, int max_new_tokens, bool sample = false,
+      float temperature = 1.0f, int top_k = 0, float top_p = 1.0f,
+      float repetition_penalty = 1.0f, uint64_t seed = 0) const;
 
  private:
   // Builds [cond, text, sem] inputs_embeds for the given semantic prefix.

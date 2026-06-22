@@ -172,6 +172,11 @@ Performance (env vars, honored by both `synth` and the server):
   Euler at equal steps, so you can cut `--steps` and keep quality: `--steps 16`
   ≈ Euler-25 at ~1.5× the S2A stage, `--steps 12` ~2× with a small quality
   tradeoff (validated by log-mel distance). Default stays Euler-25.
+- `C4TTS_BATCH=1` — for long (multi-segment) text, batch the T2S decode across
+  segments instead of one at a time. Lossless (bit-identical output), but only
+  a net win for several balanced segments — for few or length-imbalanced
+  segments the extra per-batch compute can offset the parallelism, and it uses
+  N× the KV-cache memory, so it's opt-in.
 - `C4TTS_TIMING=1` — print per-stage timings (prompt / t2s / s2a / bigvgan).
 
 The fp32 residual stream, norms, attention, and sampling are always preserved;

@@ -61,9 +61,23 @@ class Pipeline {
                const std::vector<int>& text_token_ids,
                const SynthOptions& opt = {}) const;
 
+  // Batched long-form synthesis: the T2S decode for all `seg_token_ids`
+  // segments runs as one batch (big throughput win on the dominant T2S stage),
+  // then S2A + BigVGAN render each segment's waveform. Returns one waveform per
+  // segment (caller cross-fades them). Equivalent output to calling synth() per
+  // segment, just faster.
+  std::vector<Tensor> synth_batch(const Prompt& prompt,
+                                  const std::vector<std::vector<int>>& seg_token_ids,
+                                  const SynthOptions& opt = {}) const;
+
   int sample_rate() const { return 22050; }
 
  private:
+  // Renders a waveform from generated semantic codes + LM latent (S2A -> mel ->
+  // BigVGAN). Shared by synth() and synth_batch().
+  Tensor render_from_codes(const Prompt& prompt, const Tensor& codes,
+                           const Tensor& latent, const SynthOptions& opt) const;
+
   std::string root_;
   WeightStore w2v_w_, camp_w_, s2a_w_, t2s_w_, audio_w_, bigvgan_w_;
   W2VBert w2vbert_;

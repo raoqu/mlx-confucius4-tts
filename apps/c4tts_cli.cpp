@@ -168,11 +168,22 @@ int synth(int argc, char** argv) {
   std::cout << "c4tts: synthesizing (" << seg_ids.size() << " segment(s), "
             << "max_new=" << opt.max_new_tokens << ", steps=" << opt.n_timesteps
             << ", " << (opt.sample ? "sampling" : "greedy") << ") ...\n";
+  // Multi-segment long text: optionally batch the T2S decode across segments.
+  // Opt-in (C4TTS_BATCH=1): it's lossless but only wins for several balanced
+  // segments — for few/imbalanced segments the per-batch compute can offset the
+  // parallelism, and it uses N x the KV-cache memory.
+  const char* batch_env = std::getenv("C4TTS_BATCH");
+  const bool batch = seg_ids.size() > 1 && batch_env && std::strcmp(batch_env, "1") == 0;
   std::vector<c4::Tensor> waves;
-  waves.reserve(seg_ids.size());
-  for (size_t i = 0; i < seg_ids.size(); ++i) {
-    if (seg_ids.size() > 1) std::cout << "c4tts: segment " << (i + 1) << "/" << seg_ids.size() << "\n";
-    waves.push_back(pipe.synth(cond, seg_ids[i], opt));
+  if (batch) {
+    std::cout << "c4tts: batched T2S over " << seg_ids.size() << " segments\n";
+    waves = pipe.synth_batch(cond, seg_ids, opt);
+  } else {
+    waves.reserve(seg_ids.size());
+    for (size_t i = 0; i < seg_ids.size(); ++i) {
+      if (seg_ids.size() > 1) std::cout << "c4tts: segment " << (i + 1) << "/" << seg_ids.size() << "\n";
+      waves.push_back(pipe.synth(cond, seg_ids[i], opt));
+    }
   }
   c4::Tensor wav = c4::cross_fade_concat(waves, pipe.sample_rate());
   c4::write_wav(out, wav, pipe.sample_rate());

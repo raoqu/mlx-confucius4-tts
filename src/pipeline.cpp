@@ -93,7 +93,14 @@ Tensor Pipeline::synth(const Prompt& p,
                            opt.temperature, opt.top_k, opt.top_p,
                            opt.repetition_penalty, opt.seed);
   tt.done(gen.latent);
-  const int n_codes = gen.codes.shape(1);
+  return render_from_codes(p, gen.codes, gen.latent, opt);
+}
+
+Tensor Pipeline::render_from_codes(const Prompt& p, const Tensor& codes,
+                                   const Tensor& latent,
+                                   const SynthOptions& opt) const {
+  const int n_codes = codes.shape(1);
+  if (n_codes == 0) return mx::zeros({0}, mx::float32);  // empty segment -> silence
   const int target_len = static_cast<int>(n_codes * opt.length_ratio);
 
   // Initial flow-matching noise (B=1, 80, T_ref + target). Seeded for
@@ -103,7 +110,7 @@ Tensor Pipeline::synth(const Prompt& p,
 
   // S2A -> mel; BigVGAN -> waveform.
   Stage ts("s2a");
-  Tensor mel = s2a_.inference(gen.codes, gen.latent, p.ref_mel, p.style,
+  Tensor mel = s2a_.inference(codes, latent, p.ref_mel, p.style,
                               target_len, z, opt.n_timesteps,
                               opt.inference_cfg_rate);
   ts.done(mel);
@@ -111,6 +118,22 @@ Tensor Pipeline::synth(const Prompt& p,
   Tensor wav = bigvgan_.forward(mel);  // (1, 1, T*256)
   tv.done(wav);
   return mx::flatten(wav);
+}
+
+std::vector<Tensor> Pipeline::synth_batch(
+    const Prompt& p, const std::vector<std::vector<int>>& seg_token_ids,
+    const SynthOptions& opt) const {
+  Stage tt("t2s-batch");
+  auto gens = t2s_.generate_batch(seg_token_ids, p.semantic, opt.max_new_tokens,
+                                  opt.sample, opt.temperature, opt.top_k, opt.top_p,
+                                  opt.repetition_penalty, opt.seed);
+  if (!gens.empty()) tt.done(gens.back().latent);
+  std::vector<Tensor> waves;
+  waves.reserve(gens.size());
+  for (const auto& g : gens) {
+    waves.push_back(render_from_codes(p, g.codes, g.latent, opt));
+  }
+  return waves;
 }
 
 }  // namespace c4
