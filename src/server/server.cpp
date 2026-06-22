@@ -1343,8 +1343,11 @@ void handle_speech(int fd,
         return;
     }
 
-    fs::create_directories("outputs");
-    const std::string out_wav = "outputs/.tmp_req_" + std::to_string(request_id) + ".wav";
+    // Keep synthesis scratch alongside the voice store (not in the CWD) so all
+    // runtime data lives under one directory next to the app.
+    const std::string tmp_dir = (fs::path(cfg.voice_store_dir) / ".tmp").string();
+    fs::create_directories(tmp_dir);
+    const std::string out_wav = (fs::path(tmp_dir) / ("req_" + std::to_string(request_id) + ".wav")).string();
 
     if (cfg.verbose) {
         std::cerr << ">> request " << request_id << ": voice=" << voice_rec->id
@@ -1662,7 +1665,8 @@ int run_server(const std::string& host,
         std::cerr << "error: listen() failed" << std::endl;
         return 1;
     }
-    fs::create_directories("outputs");
+    // Synthesis scratch lives under <voice_store>/.tmp (created per request), so
+    // no CWD-relative outputs/ directory is needed.
     std::cerr << ">> c4tts server listening on http://" << host << ":" << port << std::endl;
     std::cerr << ">> endpoints: POST /v1/audio/speech, /v1/audio/voices, /api/voices" << std::endl;
     if (cfg.web_enabled) {
