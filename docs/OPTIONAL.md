@@ -138,6 +138,9 @@ CoreML 转换、与 MLX 混跑的协调，落地风险高、不确定性大。
 - **fp16 在本机不是加速手段**：实测 T2S fp16 仅 ~1.1×、S2A/BigVGAN fp16 无收益甚至更慢
   （BigVGAN conv fp16 890ms vs fp32 664ms）。MLX/Metal 对这些 op 的 fp16 路径不加速。
   **加速靠 int8 `quantized_matmul`（matmul 重的阶段），不是 fp16。**
+- **批处理（⑥）不是纯 dispatch 收益**：原以为 M=1→M=N 几乎免费（纯 dispatch 受限），
+  实测 int8 解码每步有真实 compute，batch-2 步 ≈ 1.44× 单步，故净收益仅 ~1.2–1.3×（非 N×），
+  且段长不均会浪费并行（跑到最长段）。结论正确无损但收益有限、随**均衡段数**增长，已设为 opt-in。
 
 ---
 
@@ -150,8 +153,8 @@ ROI 从高到低（均可独立验证）：
 
 | 选项 | 收益 | 工作量 | 重训? | 状态 |
 |---|---|---|---|---|
-| ① S2A 换 DPM-Solver++ 求解器 | S2A ~2× | 中 | 否 | **下一步** |
-| ⑥ 长文本多段批处理（batched decode） | 长文本 T2S ~2.5× | 中大 | 否 | 计划中 |
+| ① S2A 换 DPM-Solver++ 求解器 | S2A ~1.5×（ab2-16） | 中 | 否 | ✅ 已落地（opt-in）|
+| ⑥ 长文本多段批处理（batched decode） | T2S ~1.2–1.3×（实测，非 2.5×）| 中大 | 否 | ✅ 已落地（opt-in，默认关）|
 | ②' S2A DiT int8 `quantized_matmul` | S2A/前向 ~1.5–2× | 中大 | 否 | 计划中（替代原 fp16 方案）|
 | ③ T2S `mx::compile` + 定长 KV cache | T2S ~1.3× | 中大 | 否 | — |
 | ④ **T2S Medusa / 投机解码** | T2S ~2× | 大 | 轻量 | 冲 2–3× 必经 |
