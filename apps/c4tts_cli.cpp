@@ -14,10 +14,14 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "c4tts/npy.h"
 
 #include "c4tts/lang_tokens.h"
 #include "c4tts/longform.h"
@@ -207,6 +211,43 @@ int synth(int argc, char** argv) {
   return 0;
 }
 
+// Repack a WeightStore directory of per-tensor .npy files into one
+// <module>.safetensors per module — far fewer files to ship/download, and the
+// runtime mmaps a single file per module. Pure C++/MLX (no Python).
+//   c4tts_cli pack [--weights DIR] [--prune]
+int pack(int argc, char** argv) {
+  namespace fs = std::filesystem;
+  std::string weights = arg(argc, argv, "--weights");
+  if (weights.empty()) weights = default_weights_dir();
+  const bool prune = has_flag(argc, argv, "--prune");
+  static const char* kModules[] = {"t2s", "s2a", "w2vbert", "campplus", "bigvgan", "audio"};
+  int packed = 0;
+  for (const char* mod : kModules) {
+    const std::string dir = weights + "/" + mod;
+    if (!fs::is_directory(dir)) continue;
+    std::unordered_map<std::string, c4::Tensor> tensors;
+    for (const auto& e : fs::recursive_directory_iterator(dir)) {
+      if (!e.is_regular_file() || e.path().extension() != ".npy") continue;
+      std::string key = fs::relative(e.path(), dir).string();
+      key = key.substr(0, key.size() - 4);  // strip ".npy"
+      tensors.emplace(key, c4::load_npy_mmap(e.path().string()));
+    }
+    if (tensors.empty()) continue;
+    const std::string out = weights + "/" + mod + ".safetensors";
+    mx::save_safetensors(out, tensors);
+    std::error_code ec;
+    const auto bytes = fs::file_size(out, ec);
+    std::cout << "c4tts: packed " << tensors.size() << " tensors -> " << out << " ("
+              << (ec ? 0 : bytes / (1024 * 1024)) << " MB)\n";
+    ++packed;
+    if (prune) { fs::remove_all(dir, ec); std::cout << "  removed " << dir << "\n"; }
+  }
+  std::cout << "c4tts: packed " << packed << " module(s)"
+            << (prune ? " and pruned the .npy dirs" : "; rerun with --prune to delete the .npy dirs")
+            << "\n";
+  return packed > 0 ? 0 : 2;
+}
+
 // HTTP server + web admin. Mirrors index-tts2-metal's --web/--server modes:
 //   c4tts_cli --server [--host H] [--port P] [--weights DIR] [--voice-store DIR]
 //   c4tts_cli --web    [--web-key KEY] [--host H] [--port P] ...
@@ -265,6 +306,7 @@ int main(int argc, char** argv) {
   if (!std::getenv("C4TTS_QUANT")) ::setenv("C4TTS_QUANT", "8", /*overwrite=*/0);
 
   if (argc >= 2 && std::strcmp(argv[1], "synth") == 0) return synth(argc, argv);
+  if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) return pack(argc, argv);
   // Server mode: `serve` subcommand, or --web/--server anywhere in the args.
   if ((argc >= 2 && std::strcmp(argv[1], "serve") == 0) ||
       has_flag(argc, argv, "--web") || has_flag(argc, argv, "--server")) {

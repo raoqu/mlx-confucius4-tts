@@ -6,14 +6,24 @@
 #include <sys/stat.h>
 
 #include "c4tts/npy.h"
+#include "mlx/mlx.h"
 
 namespace c4 {
 
 WeightStore::WeightStore(std::string path) : root_(std::move(path)) {
   if (!root_.empty() && root_.back() == '/') root_.pop_back();
+  // Prefer a consolidated <root>.safetensors (one mmap'd file per module) —
+  // far fewer files to ship/download than a directory of per-tensor .npy.
+  const std::string st_path = root_ + ".safetensors";
   struct stat st {};
+  if (stat(st_path.c_str(), &st) == 0 && (st.st_mode & S_IFREG)) {
+    for (auto& kv : mx::load_safetensors(st_path).first) cache_.emplace(kv.first, kv.second);
+    packed_ = true;
+    return;
+  }
+  // Fall back to a directory of per-tensor .npy files.
   if (stat(root_.c_str(), &st) != 0 || !(st.st_mode & S_IFDIR)) {
-    throw std::runtime_error("WeightStore: not a directory: " + root_);
+    throw std::runtime_error("WeightStore: no " + st_path + " and not a directory: " + root_);
   }
 }
 
@@ -22,6 +32,7 @@ std::string WeightStore::path_for(const std::string& name) const {
 }
 
 bool WeightStore::has(const std::string& name) const {
+  if (packed_) return cache_.find(name) != cache_.end();
   struct stat st {};
   return stat(path_for(name).c_str(), &st) == 0;
 }
@@ -29,6 +40,10 @@ bool WeightStore::has(const std::string& name) const {
 Tensor WeightStore::get(const std::string& name) const {
   auto it = cache_.find(name);
   if (it != cache_.end()) return it->second;
+  if (packed_) {  // safetensors holds every tensor up front
+    throw std::runtime_error("WeightStore: missing weight '" + name + "' in " +
+                             root_ + ".safetensors");
+  }
   if (!has(name)) {
     throw std::runtime_error("WeightStore: missing weight '" + name + "' in " +
                              root_);

@@ -27,7 +27,7 @@ done
 
 export_store() {  # name  sentinel_file
   local name="$1" sentinel="$2"
-  if [[ -z "$FORCE" && -f "$W/$name/$sentinel" ]]; then
+  if [[ -z "$FORCE" && ( -f "$W/$name/$sentinel" || -f "$W/$name.safetensors" ) ]]; then
     echo ">> [$name] already present, skipping (use --force to redo)"
     return
   fi
@@ -52,6 +52,20 @@ if [[ -n "$FORCE" || ! -f "$W/tokenizer/vocab.tsv" ]]; then
   "$PY" "$C4/tools/export_tokenizer.py"
 else
   echo ">> [tokenizer] already present, skipping"
+fi
+
+# Consolidate the per-tensor .npy into one <module>.safetensors per module
+# (~2400 files -> 6, much faster to load and to upload/download). Needs the
+# built binary; if it isn't there yet, print the command to run after building.
+CLI="$C4/build/c4tts_cli"
+if ls "$W"/*.safetensors >/dev/null 2>&1 && [[ -z "$FORCE" ]]; then
+  echo ">> weights already packed (*.safetensors present)"
+elif [[ -x "$CLI" ]]; then
+  echo ">> packing weights into per-module safetensors"
+  "$CLI" pack --weights "$W" --prune
+else
+  echo ">> build c4tts_cli, then consolidate with:"
+  echo "     $CLI pack --weights $W --prune"
 fi
 
 echo ">> all runtime model files ready under $W"

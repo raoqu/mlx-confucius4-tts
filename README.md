@@ -127,6 +127,10 @@ The runtime never invokes a Python interpreter, but by default the binary loads
    ./prepare.sh                              # or: python3 tools/export_weights.py all
                                              #     python3 tools/export_tokenizer.py
    ```
+   `prepare.sh` then consolidates the per-tensor `.npy` into one
+   `bin/<module>.safetensors` per module via `c4tts_cli pack --prune` (~2400
+   files → 6, faster to load and to ship). The runtime prefers a module's
+   `.safetensors` and falls back to its `.npy` directory if absent.
 2. Synthesize. `--weights` defaults to `bin/` (resolved relative to the binary),
    and `--text` is tokenized in C++:
    ```bash

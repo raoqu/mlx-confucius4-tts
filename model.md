@@ -74,7 +74,8 @@ These are weights for the **c4tts** engine (a C++/MLX runtime), not a
    ```bash
    huggingface-cli download <this-repo> --local-dir bin
    ```
-   Layout: `bin/{t2s,s2a,w2vbert,campplus,bigvgan,audio}/*.npy` + `bin/tokenizer/vocab.tsv`.
+   Layout (8 files): `bin/{t2s,s2a,w2vbert,campplus,bigvgan,audio}.safetensors` +
+   `bin/tokenizer/vocab.tsv`. Each module is one memory-mapped safetensors file.
 3. Synthesize (text is tokenized in C++ — no Python at run time):
    ```bash
    # CLI: clone the voice in ref.wav and read the text

@@ -36,8 +36,11 @@ class WeightStore {
  private:
   std::string path_for(const std::string& name) const;
   std::string root_;
-  // Parsed tensors are cached so repeated get() calls (every block, every AR
-  // step) don't re-read/parse the .npy from disk. MLX arrays are cheap handles.
+  // When a consolidated <root>.safetensors exists it's mmap'd once at
+  // construction and all tensors live in cache_; otherwise tensors are loaded
+  // lazily from per-tensor <root>/<name>.npy. cache_ holds both (MLX arrays are
+  // cheap handles), so repeated get() calls don't re-read from disk.
+  bool packed_ = false;
   mutable std::unordered_map<std::string, Tensor> cache_;
 };
 
