@@ -14,6 +14,7 @@ Usage (run from repo root):
 """
 import argparse
 import os
+import re
 import sys
 
 import numpy as np
@@ -30,9 +31,15 @@ for _p in (REPO_ROOT, _REF):
         sys.path.insert(0, _p)
 
 DEFAULT_OUT = os.path.join(REPO_ROOT, "bin")
-# Recomputable buffers we never need to ship: DiT RoPE table, and the fixed
-# Kaiser-sinc anti-aliasing filters (baked separately for the vocoder).
-SKIP_SUFFIXES = ("freqs_cis", ".filter")
+# Buffers/counters the C++ runtime never loads: DiT RoPE table, the fixed
+# Kaiser-sinc anti-aliasing filters (baked separately for the vocoder), and
+# PyTorch BatchNorm step counters (inference uses only running_mean/var).
+SKIP_SUFFIXES = ("freqs_cis", ".filter", "num_batches_tracked")
+
+# W2V-BERT is only run up to the layer whose hidden states we extract for
+# semantic features (pipeline.cpp: w2vbert_.forward(feats, 17) runs layers
+# 0..16). Layers >= this are never executed, so don't export them (~677 MB).
+W2VBERT_NUM_LAYERS = 17
 
 
 def _save(out_dir, name, arr):
@@ -108,9 +115,14 @@ def export_w2vbert(out_base):
     m = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
     sd = m.state_dict()
     out_dir = os.path.join(out_base, "w2vbert")
-    # Only the feature projection + conformer layers are needed.
-    sd = {k: v for k, v in sd.items()
-          if k.startswith("feature_projection.") or k.startswith("encoder.layers.")}
+    # Only the feature projection + the conformer layers we actually run
+    # (0 .. W2VBERT_NUM_LAYERS-1). Deeper layers are never executed.
+    def _keep(k):
+        if k.startswith("feature_projection."):
+            return True
+        m = re.match(r"encoder\.layers\.(\d+)\.", k)
+        return m is not None and int(m.group(1)) < W2VBERT_NUM_LAYERS
+    sd = {k: v for k, v in sd.items() if _keep(k)}
     n = export_state_dict(sd, out_dir)
     # Also export the layer-17 normalization stats (wav2vec2bert_stats.pt),
     # found under checkpoints/ of this repo or the upstream reference repo.
